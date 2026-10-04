@@ -1,0 +1,19 @@
+[package]
+name = "wawona-terminal"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Wawona Terminal. VT screen and UniFFI session. Hosts draw the cells."
+repository = "https://github.com/Wawona/Terminal"
+rust-version = "1.75"
+
+[lib]
+name = "wawona_terminal"
+crate-type = ["lib", "staticlib", "cdylib"]
+
+[features]
+gtk = ["dep:gtk4"]
+
+[dependencies]
+uniffi = "0.30"
+gtk4 = { version = "0.9", optional = true }
