@@ -1,5 +1,6 @@
 package com.aspauldingcode.wawona
 
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -17,6 +18,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.nio.ByteBuffer
@@ -47,10 +49,14 @@ fun WawonaTerminalText(
     ) {
         items(lines) { line ->
             Text(
-                text = line,
+                text = if (line.text.isEmpty()) AnnotatedString(" ") else line,
                 fontFamily = fontFamily,
                 fontSize = 13.sp,
                 color = Color(0xFFE8E8E8),
+                softWrap = false,
+                maxLines = 1,
+                overflow = TextOverflow.Clip,
+                modifier = Modifier.defaultMinSize(minHeight = 16.dp),
             )
         }
     }

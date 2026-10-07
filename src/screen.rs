@@ -89,6 +89,9 @@ pub struct Term {
     cursor_x: usize,
     cursor_y: usize,
     pending_wrap: bool,
+    /// DEC autowrap (mode 7). On by default. A graphic past the last column
+    /// wraps once. A following CR or LF does not add a second break.
+    autowrap: bool,
     style: Style,
     alt: Option<Alt>,
     state: Vt,
@@ -152,6 +155,7 @@ impl Term {
             cursor_x: 0,
             cursor_y: 0,
             pending_wrap: false,
+            autowrap: true,
             style,
             alt: None,
             state: Vt::Ground,
@@ -305,7 +309,10 @@ impl Term {
 
     fn control(&mut self, b: u8) {
         match b {
-            b'\n' | b'\x0C' => self.newline(),
+            // LF and FF are index: down one row, same column. CR is separate.
+            // ncurses `ind` / `cud1` is LF. A new row at column 0 is CR+LF
+            // (the PTY ONLCR path, or NEL).
+            b'\n' | 0x0C => self.index(),
             b'\r' => self.carriage_return(),
             0x08 => {
                 self.pending_wrap = false;
@@ -466,6 +473,12 @@ impl Term {
             return;
         }
         for mode in params {
+            if *mode == 7 {
+                self.autowrap = enable;
+                if !enable {
+                    self.pending_wrap = false;
+                }
+            }
             if matches!(mode, 47 | 1047 | 1049) {
                 if enable {
                     self.enter_alt();
@@ -563,11 +576,17 @@ impl Term {
 
     fn print_char(&mut self, ch: char) {
         if self.pending_wrap {
-            self.newline();
+            if self.autowrap {
+                self.newline();
+            } else {
+                self.pending_wrap = false;
+            }
         }
         self.put(self.cursor_x, self.cursor_y, ch);
         if self.cursor_x + 1 >= self.cols {
-            self.pending_wrap = true;
+            if self.autowrap {
+                self.pending_wrap = true;
+            }
         } else {
             self.cursor_x += 1;
         }
@@ -708,6 +727,7 @@ impl Term {
         self.cursor_x = 0;
         self.cursor_y = 0;
         self.pending_wrap = false;
+        self.autowrap = true;
     }
 
     fn used_rows(&self) -> usize {
@@ -1056,11 +1076,52 @@ mod tests {
     #[test]
     fn newline_scrolls_into_history() {
         let mut term = Term::new(8, 2);
-        term.feed(b"one\ntwo\nthree");
+        term.feed(b"one\r\ntwo\r\nthree");
         assert!(term.line_count() >= 3);
         let (first, _) = line_text(&term, 0);
         assert_eq!(first, "one");
         let (last, _) = line_text(&term, term.line_count() - 1);
         assert_eq!(last, "three");
+    }
+
+    #[test]
+    fn line_feed_keeps_the_column() {
+        let mut term = Term::new(8, 4);
+        term.feed(b"abcd\nX");
+        let (first, _) = line_text(&term, 0);
+        let (second, _) = line_text(&term, 1);
+        assert_eq!(first, "abcd");
+        assert_eq!(second, "    X");
+    }
+
+    #[test]
+    fn carriage_return_line_feed_starts_the_next_row() {
+        let mut term = Term::new(8, 4);
+        term.feed(b"abcd\r\nX");
+        let (second, _) = line_text(&term, 1);
+        assert_eq!(second, "X");
+        assert_eq!(term.line_count(), 2);
+    }
+
+    #[test]
+    fn full_width_line_then_crlf_does_not_insert_a_blank_row() {
+        let mut term = Term::new(4, 6);
+        term.feed(b"abcd\r\nX");
+        let (first, _) = line_text(&term, 0);
+        let (second, _) = line_text(&term, 1);
+        assert_eq!(first, "abcd");
+        assert_eq!(second, "X");
+        assert_eq!(term.line_count(), 2);
+    }
+
+    #[test]
+    fn blank_row_between_text_stays_in_the_grid() {
+        let mut term = Term::new(8, 6);
+        term.feed(b"top\r\n\r\nbottom");
+        assert_eq!(term.line_count(), 3);
+        let (mid, _) = line_text(&term, 1);
+        let (last, _) = line_text(&term, 2);
+        assert_eq!(mid, "");
+        assert_eq!(last, "bottom");
     }
 }

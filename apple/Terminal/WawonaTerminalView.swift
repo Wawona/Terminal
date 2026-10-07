@@ -101,7 +101,9 @@ enum WawonaTerminalSnapshot {
             for index in 0..<end {
                 let cell = pieces[index]
                 let key = (cell.1, cell.2, cell.3)
-                if style != key {
+                let styleChanged =
+                    style.map { $0.0 != key.0 || $0.1 != key.1 || $0.2 != key.2 } ?? true
+                if styleChanged {
                     if !text.isEmpty, let style {
                         spans.append(span(id: spanID, text: text, style: style))
                         spanID += 1
@@ -210,11 +212,16 @@ public struct WawonaTerminalView: View {
         }
     }
 
-    private func lineText(_ line: WawonaTerminalLine) -> Text {
-        line.spans.reduce(Text("")) { acc, span in
+    private func lineText(_ line: WawonaTerminalLine) -> some View {
+        let body = line.spans.reduce(Text("")) { acc, span in
             acc + spanText(span)
         }
-        .font(.custom("DejaVuSansM Nerd Font Mono", size: 13))
+        let row = line.spans.isEmpty ? Text(" ") : body
+        return row
+            .font(.custom("DejaVuSansM Nerd Font Mono", size: 13))
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: true)
+            .frame(minHeight: 16, alignment: .leading)
     }
 
     private func spanText(_ span: WawonaTerminalSpan) -> Text {

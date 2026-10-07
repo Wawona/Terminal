@@ -6,6 +6,13 @@ use crate::{TerminalSession, TerminalSpan};
 use gtk4::prelude::*;
 use gtk4::{TextBuffer, TextTag};
 
+/// One VT row is one visual row. GTK must not soft-wrap a full-width line.
+pub fn configure_view(view: &gtk4::TextView) {
+    view.set_wrap_mode(gtk4::WrapMode::None);
+    view.set_monospace(true);
+    view.set_editable(false);
+}
+
 pub fn fill_buffer(session: &TerminalSession, buffer: &TextBuffer) {
     buffer.set_text("");
     let table = buffer.tag_table();
