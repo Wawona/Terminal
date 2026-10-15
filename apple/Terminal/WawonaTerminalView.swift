@@ -36,19 +36,44 @@ public struct WawonaTerminalLine: Identifiable {
     }
 }
 
-/// Styled lines for the SwiftUI scroll view. The VT screen stays in Rust.
+/// Styled lines for the SwiftUI scroll view.
+/// The document is UniFFI `TerminalSession.lines()` (same JSON as `lines_json`).
 @objc(WawonaTerminalModel)
 public final class WawonaTerminalModel: NSObject, ObservableObject {
     @Published public var lines: [WawonaTerminalLine] = []
+    private var nextLineID = 1
+    private var lineIDs: [Int] = []
+    private var lineKeys: [String] = []
 
     @objc public override init() {
         super.init()
     }
 
-    /// Little-endian pack from `wwn_term_export`: line count, then each line's
-    /// cell count and cp, fg, bg, attrs.
-    @objc public func applySnapshot(_ data: Data) {
-        let next = WawonaTerminalSnapshot.lines(from: data)
+    @objc public func applyLines(_ document: String) {
+        let parsed = WawonaTerminalDocument.lines(from: document)
+        let keys = parsed.map { $0.spans.map(\.text).joined(separator: "\u{1}") }
+        lineIDs = alignTerminalLineIDs(oldIDs: lineIDs, oldKeys: lineKeys, newKeys: keys) {
+            let id = self.nextLineID
+            self.nextLineID += 1
+            return id
+        }
+        lineKeys = keys
+        let next = zip(lineIDs, parsed).map { id, line in
+            WawonaTerminalLine(
+                id: id,
+                spans: line.spans.enumerated().map { index, span in
+                    WawonaTerminalSpan(
+                        id: index,
+                        text: span.text,
+                        fg: span.fg,
+                        bg: span.bg,
+                        bold: span.bold,
+                        italic: span.italic,
+                        underline: span.underline
+                    )
+                }
+            )
+        }
         if Thread.isMainThread {
             lines = next
         } else {
@@ -59,92 +84,71 @@ public final class WawonaTerminalModel: NSObject, ObservableObject {
     }
 }
 
-enum WawonaTerminalSnapshot {
-    static func lines(from data: Data) -> [WawonaTerminalLine] {
-        if data.count < 4 {
-            return []
-        }
-        var offset = 0
-        let lineCount = readU32(data, &offset)
-        var lines: [WawonaTerminalLine] = []
-        lines.reserveCapacity(Int(lineCount))
-        for lineIndex in 0..<Int(lineCount) {
-            if offset + 4 > data.count {
-                break
-            }
-            let cells = Int(readU32(data, &offset))
-            var pieces: [(UInt32, UInt32, UInt32, UInt32)] = []
-            pieces.reserveCapacity(cells)
-            for _ in 0..<cells {
-                if offset + 16 > data.count {
-                    break
-                }
-                let cp = readU32(data, &offset)
-                let fg = readU32(data, &offset)
-                let bg = readU32(data, &offset)
-                let attrs = readU32(data, &offset)
-                pieces.append((cp, fg, bg, attrs))
-            }
-            var end = pieces.count
-            while end > 0 {
-                let cell = pieces[end - 1]
-                if (cell.0 == 0 || cell.0 == 32) && cell.2 == 0 {
-                    end -= 1
-                } else {
-                    break
-                }
-            }
-            var spans: [WawonaTerminalSpan] = []
-            var text = ""
-            var style: (UInt32, UInt32, UInt32)?
-            var spanID = 0
-            for index in 0..<end {
-                let cell = pieces[index]
-                let key = (cell.1, cell.2, cell.3)
-                let styleChanged =
-                    style.map { $0.0 != key.0 || $0.1 != key.1 || $0.2 != key.2 } ?? true
-                if styleChanged {
-                    if !text.isEmpty, let style {
-                        spans.append(span(id: spanID, text: text, style: style))
-                        spanID += 1
-                        text = ""
-                    }
-                    style = key
-                }
-                let cp = cell.0 == 0 ? 32 : cell.0
-                if let scalar = Unicode.Scalar(cp) {
-                    text.append(Character(scalar))
-                }
-            }
-            if !text.isEmpty, let style {
-                spans.append(span(id: spanID, text: text, style: style))
-            }
-            lines.append(WawonaTerminalLine(id: lineIndex, spans: spans))
-        }
-        return lines
+private func alignTerminalLineIDs(
+    oldIDs: [Int],
+    oldKeys: [String],
+    newKeys: [String],
+    mint: () -> Int
+) -> [Int] {
+    if newKeys == oldKeys, newKeys.count == oldIDs.count {
+        return oldIDs
     }
-
-    private static func span(id: Int, text: String, style: (UInt32, UInt32, UInt32))
-        -> WawonaTerminalSpan
+    if newKeys.count >= oldKeys.count, Array(newKeys.prefix(oldKeys.count)) == oldKeys {
+        var ids = oldIDs
+        while ids.count < newKeys.count {
+            ids.append(mint())
+        }
+        return ids
+    }
+    if !oldKeys.isEmpty, newKeys.count == oldKeys.count,
+        Array(newKeys.dropLast()) == Array(oldKeys.dropFirst())
     {
-        WawonaTerminalSpan(
-            id: id,
-            text: text,
-            fg: style.0,
-            bg: style.1,
-            bold: style.2 & 1 != 0,
-            italic: style.2 & 4 != 0,
-            underline: style.2 & 8 != 0
-        )
+        var ids = Array(oldIDs.dropFirst())
+        ids.append(mint())
+        return ids
+    }
+    var ids: [Int] = []
+    let overlap = min(oldIDs.count, newKeys.count)
+    for _ in 0..<(newKeys.count - overlap) {
+        ids.append(mint())
+    }
+    ids.append(contentsOf: oldIDs.suffix(overlap))
+    return ids
+}
+
+private struct TermLineRecord: Decodable {
+    struct Span: Decodable {
+        let text: String
+        let fg: UInt32
+        let bg: UInt32
+        let bold: Bool
+        let italic: Bool
+        let underline: Bool
     }
 
-    private static func readU32(_ data: Data, _ offset: inout Int) -> UInt32 {
-        let b0 = UInt32(data[offset])
-        let b1 = UInt32(data[offset + 1])
-        let b2 = UInt32(data[offset + 2])
-        let b3 = UInt32(data[offset + 3])
-        offset += 4
-        return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
+    let spans: [Span]
+}
+
+enum WawonaTerminalDocument {
+    static func lines(from document: String) -> [WawonaTerminalLine] {
+        let data = Data(document.utf8)
+        let decoded = (try? JSONDecoder().decode([TermLineRecord].self, from: data)) ?? []
+        return decoded.enumerated().map { index, line in
+            WawonaTerminalLine(
+                id: index,
+                spans: line.spans.enumerated().map { spanIndex, span in
+                    WawonaTerminalSpan(
+                        id: spanIndex,
+                        text: span.text,
+                        fg: span.fg,
+                        bg: span.bg,
+                        bold: span.bold,
+                        italic: span.italic,
+                        underline: span.underline
+                    )
+                }
+            )
+        }
     }
 }
 
@@ -213,19 +217,31 @@ public struct WawonaTerminalView: View {
     }
 
     private func lineText(_ line: WawonaTerminalLine) -> some View {
-        let body = line.spans.reduce(Text("")) { acc, span in
-            acc + spanText(span)
+        let spans = line.spans.isEmpty
+            ? [WawonaTerminalSpan(id: 0, text: " ", fg: 0xE8E8E8, bg: 0, bold: false, italic: false, underline: false)]
+            : line.spans
+        return HStack(spacing: 0) {
+            ForEach(spans) { span in
+                spanView(span)
+            }
         }
-        let row = line.spans.isEmpty ? Text(" ") : body
-        return row
-            .font(.custom("DejaVuSansM Nerd Font Mono", size: 13))
-            .lineLimit(1)
-            .fixedSize(horizontal: true, vertical: true)
-            .frame(minHeight: 16, alignment: .leading)
+        .lineLimit(1)
+        .fixedSize(horizontal: true, vertical: true)
+        .frame(minHeight: 16, alignment: .leading)
     }
 
-    private func spanText(_ span: WawonaTerminalSpan) -> Text {
-        var text = Text(span.text).foregroundColor(rgb(span.fg))
+    private func spanView(_ span: WawonaTerminalSpan) -> some View {
+        HStack(spacing: 0) {
+            ForEach(Array(terminalFontRuns(span.text).enumerated()), id: \.offset) { _, run in
+                styled(run.0, span)
+                    .font(run.1 ? Font.custom("DejaVuSansM Nerd Font Mono", size: 13) : Font.system(size: 13, design: .monospaced))
+            }
+        }
+        .background(span.bg == 0 ? Color.clear : rgb(span.bg))
+    }
+
+    private func styled(_ raw: String, _ span: WawonaTerminalSpan) -> Text {
+        var text = Text(raw).foregroundColor(rgb(span.fg))
         if span.bold {
             text = text.bold()
         }
@@ -245,6 +261,39 @@ public struct WawonaTerminalView: View {
             blue: Double(value & 0xFF) / 255
         )
     }
+}
+
+private func terminalFontRuns(_ text: String) -> [(String, Bool)] {
+    func nerd(_ ch: Character) -> Bool {
+        !ch.unicodeScalars.isEmpty
+            && ch.unicodeScalars.allSatisfy { scalar in
+                let u = scalar.value
+                return (0xE000...0xF8FF).contains(u)
+                    || (0xF0000...0xFFFFD).contains(u)
+                    || (0x100000...0x10FFFD).contains(u)
+            }
+    }
+    var out: [(String, Bool)] = []
+    var current = ""
+    var flag: Bool?
+    func flush() {
+        guard let flag, !current.isEmpty else { return }
+        out.append((current, flag))
+        current = ""
+    }
+    for ch in text {
+        let next = nerd(ch)
+        if flag != next {
+            flush()
+            flag = next
+        }
+        current.append(ch)
+    }
+    flush()
+    if out.isEmpty {
+        out.append((" ", false))
+    }
+    return out
 }
 
 #if os(iOS) || os(tvOS) || os(visionOS)

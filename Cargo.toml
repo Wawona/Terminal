@@ -11,9 +11,7 @@ rust-version = "1.75"
 name = "wawona_terminal"
 crate-type = ["lib", "staticlib", "cdylib"]
 
-[features]
-gtk = ["dep:gtk4"]
-
 [dependencies]
 uniffi = "0.30"
-gtk4 = { version = "0.9", optional = true }
+flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"] }
+png = "0.17.16"

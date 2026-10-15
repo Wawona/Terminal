@@ -1,12 +1,9 @@
 //! Wawona Terminal.
 //!
-//! The screen is Rust. UniFFI hands styled lines to a host. SwiftUI, Compose,
-//! and GTK draw those lines. This crate does not start a Wayland client.
+//! The screen is Rust. Hosts upload `wwn_term_viewport` and draw it on the GPU.
+//! This crate does not link a GPU library.
 
 mod screen;
-
-#[cfg(feature = "gtk")]
-mod gtk_view;
 
 use std::sync::{Arc, Mutex};
 
@@ -20,11 +17,28 @@ pub struct TerminalSpan {
     pub bold: bool,
     pub italic: bool,
     pub underline: bool,
+    pub blink: bool,
+    pub strike: bool,
 }
 
 #[derive(uniffi::Record)]
 pub struct TerminalLine {
     pub spans: Vec<TerminalSpan>,
+}
+
+#[derive(uniffi::Record)]
+pub struct TerminalImage {
+    pub id: u32,
+    pub column: i32,
+    pub row: i32,
+    pub x_px: i32,
+    pub y_px: i32,
+    pub pixel_width: u32,
+    pub pixel_height: u32,
+    pub columns: u32,
+    pub rows: u32,
+    pub z: i32,
+    pub rgba: Vec<u8>,
 }
 
 #[derive(uniffi::Object)]
@@ -64,68 +78,80 @@ impl TerminalSession {
         let Ok(term) = self.inner.lock() else {
             return Vec::new();
         };
-        let count = term.line_count();
-        let mut lines = Vec::with_capacity(count);
-        for index in 0..count {
-            lines.push(TerminalLine {
-                spans: spans_for(&term, index),
-            });
-        }
-        lines
+        term.styled_lines().into_iter().map(uniffi_line).collect()
     }
-}
 
-fn spans_for(term: &screen::Term, index: usize) -> Vec<TerminalSpan> {
-    let cols = term.cols();
-    if cols == 0 {
-        return Vec::new();
+    pub fn lines_json(&self) -> String {
+        self.inner
+            .lock()
+            .map(|term| term.lines_json())
+            .unwrap_or_else(|_| "[]".to_string())
     }
-    let mut cells = vec![
-        screen::WwnTermCell {
-            cp: 0,
-            fg: 0,
-            bg: 0,
-            attrs: 0,
+
+    pub fn encode_paste(&self, text: String) -> Vec<u8> {
+        self.inner
+            .lock()
+            .map(|term| term.encode_paste(&text))
+            .unwrap_or_else(|_| text.into_bytes())
+    }
+
+    pub fn pointer(&self, button: u8, col: u32, row: u32, pressed: bool, motion: bool) {
+        if let Ok(mut term) = self.inner.lock() {
+            term.pointer(button, col, row, pressed, motion);
+        }
+    }
+
+    pub fn title(&self) -> String {
+        self.inner
+            .lock()
+            .map(|term| term.title().to_string())
+            .unwrap_or_default()
+    }
+
+    pub fn set_cell_px(&self, width: u32, height: u32) {
+        if let Ok(mut term) = self.inner.lock() {
+            term.set_cell_px(width, height);
+        }
+    }
+
+    pub fn images(&self) -> Vec<TerminalImage> {
+        let Ok(term) = self.inner.lock() else {
+            return Vec::new();
         };
-        cols
-    ];
-    let n = term.line_cells(index, &mut cells);
-    let mut end = n;
-    while end > 0 {
-        let cell = cells[end - 1];
-        if (cell.cp == 0 || cell.cp == u32::from(b' ')) && cell.bg == 0 {
-            end -= 1;
-        } else {
-            break;
-        }
+        term.placed_images()
+            .into_iter()
+            .map(|image| TerminalImage {
+                id: image.id,
+                column: image.col,
+                row: image.row,
+                x_px: image.x_px,
+                y_px: image.y_px,
+                pixel_width: image.px_w,
+                pixel_height: image.px_h,
+                columns: image.cols,
+                rows: image.rows,
+                z: image.z,
+                rgba: image.rgba,
+            })
+            .collect()
     }
-    let mut spans = Vec::new();
-    let mut text = String::new();
-    let mut style: Option<(u32, u32, u32)> = None;
-    for cell in cells.iter().take(end) {
-        let key = (cell.fg, cell.bg, cell.attrs);
-        if style != Some(key) {
-            push_span(&mut spans, &mut text, style);
-            style = Some(key);
-        }
-        let cp = char::from_u32(cell.cp).unwrap_or(' ');
-        text.push(cp);
-    }
-    push_span(&mut spans, &mut text, style);
-    spans
 }
 
-fn push_span(spans: &mut Vec<TerminalSpan>, text: &mut String, style: Option<(u32, u32, u32)>) {
-    if text.is_empty() {
-        return;
+fn uniffi_line(line: screen::StyledLine) -> TerminalLine {
+    TerminalLine {
+        spans: line
+            .spans
+            .into_iter()
+            .map(|span| TerminalSpan {
+                text: span.text,
+                fg: span.fg,
+                bg: span.bg,
+                bold: span.bold,
+                italic: span.italic,
+                underline: span.underline,
+                blink: span.blink,
+                strike: span.strike,
+            })
+            .collect(),
     }
-    let (fg, bg, attrs) = style.unwrap_or((0xE8E8E8, 0, 0));
-    spans.push(TerminalSpan {
-        text: std::mem::take(text),
-        fg,
-        bg,
-        bold: attrs & 1 != 0,
-        italic: attrs & 4 != 0,
-        underline: attrs & 8 != 0,
-    });
 }
