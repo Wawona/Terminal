@@ -9,6 +9,12 @@ use std::sync::{Arc, Mutex};
 
 uniffi::setup_scaffolding!("wawona_terminal");
 
+/// Live RAM/CPU scrollback recommendation (same probe as `Term::new`).
+#[uniffi::export]
+pub fn terminal_recommended_scrollback_cap(cols: u32) -> u32 {
+    u32::try_from(screen::recommended_scroll_cap(cols as usize)).unwrap_or(u32::MAX)
+}
+
 #[derive(uniffi::Record)]
 pub struct TerminalSpan {
     pub text: String,
@@ -58,6 +64,28 @@ impl TerminalSession {
     pub fn resize(&self, cols: u32, rows: u32) {
         if let Ok(mut term) = self.inner.lock() {
             term.resize(cols as usize, rows as usize);
+            // Columns change bytes-per-row; re-probe available RAM/CPU.
+            term.refresh_scroll_cap(1.0);
+        }
+    }
+
+    pub fn set_scrollback_cap(&self, rows: u32) {
+        if let Ok(mut term) = self.inner.lock() {
+            term.set_scroll_cap(rows as usize);
+        }
+    }
+
+    pub fn scrollback_cap(&self) -> u32 {
+        self.inner
+            .lock()
+            .map(|term| u32::try_from(term.scroll_cap()).unwrap_or(u32::MAX))
+            .unwrap_or(0)
+    }
+
+    /// Re-probe RAM/CPU. `host_factor` in 0.25…1.0 for Low Power / thermal.
+    pub fn refresh_scrollback_cap(&self, host_factor: f32) {
+        if let Ok(mut term) = self.inner.lock() {
+            term.refresh_scroll_cap(host_factor);
         }
     }
 

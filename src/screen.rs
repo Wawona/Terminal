@@ -5,7 +5,16 @@
 
 
 
-const SCROLL_CAP: usize = 8_000;
+/// Scrollback rows when the host cannot report available memory.
+const SCROLL_CAP_DEFAULT: usize = 8_000;
+const SCROLL_CAP_MIN: usize = 1_000;
+const SCROLL_CAP_MAX: usize = 100_000;
+/// Scrollback may hold at most this fraction (1/n) of available memory.
+const SCROLL_MEM_DIVISOR: u64 = 64;
+/// Cores at which the CPU scale reaches 1.0.
+const SCROLL_FULL_CPUS: usize = 8;
+const HOST_FACTOR_MIN: f32 = 0.25;
+const HOST_FACTOR_MAX: f32 = 1.0;
 const COLS_MAX: usize = 512;
 const ROWS_MAX: usize = 256;
 
@@ -128,6 +137,7 @@ pub struct Term {
     rows: usize,
     screen: Vec<Cell>,
     scrollback: Vec<Vec<Cell>>,
+    scroll_cap: usize,
     cursor_x: usize,
     cursor_y: usize,
     pending_wrap: bool,
@@ -223,6 +233,55 @@ fn display_width(ch: char) -> usize {
     1
 }
 
+/// Every scrollback cap the terminal stores passes through here.
+pub(crate) fn clamp_scroll_cap(rows: usize) -> usize {
+    rows.clamp(SCROLL_CAP_MIN, SCROLL_CAP_MAX)
+}
+
+/// Low Power / thermal scale from the host. Non-finite input means no throttle.
+pub(crate) fn sanitize_host_factor(factor: f32) -> f32 {
+    if factor.is_finite() {
+        factor.clamp(HOST_FACTOR_MIN, HOST_FACTOR_MAX)
+    } else {
+        HOST_FACTOR_MAX
+    }
+}
+
+fn scroll_row_bytes(cols: usize) -> u64 {
+    let cols = cols.clamp(1, COLS_MAX);
+    (cols * std::mem::size_of::<Cell>() + std::mem::size_of::<Vec<Cell>>()) as u64
+}
+
+/// Pure policy behind [`recommended_scroll_cap`].
+fn scroll_cap_for(available_bytes: Option<u64>, cpus: usize, cols: usize) -> usize {
+    let Some(available) = available_bytes else {
+        return SCROLL_CAP_DEFAULT;
+    };
+    let rows = available / SCROLL_MEM_DIVISOR / scroll_row_bytes(cols);
+    let cpus = cpus.clamp(1, SCROLL_FULL_CPUS) as u64;
+    let rows = rows.saturating_mul(cpus) / SCROLL_FULL_CPUS as u64;
+    clamp_scroll_cap(usize::try_from(rows).unwrap_or(usize::MAX))
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn available_memory_bytes() -> Option<u64> {
+    let meminfo = std::fs::read_to_string("/proc/meminfo").ok()?;
+    let line = meminfo.lines().find(|l| l.starts_with("MemAvailable:"))?;
+    let kib: u64 = line.split_whitespace().nth(1)?.parse().ok()?;
+    kib.checked_mul(1024)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+fn available_memory_bytes() -> Option<u64> {
+    None
+}
+
+/// Scrollback rows for `cols` columns from available RAM and CPU count.
+pub fn recommended_scroll_cap(cols: usize) -> usize {
+    let cpus = std::thread::available_parallelism().map_or(1, |n| n.get());
+    scroll_cap_for(available_memory_bytes(), cpus, cols)
+}
+
 fn dim_rgb(rgb: u32) -> u32 {
     let scale = |c: u32| (c * 62) / 100;
     (scale((rgb >> 16) & 0xff) << 16) | (scale((rgb >> 8) & 0xff) << 8) | scale(rgb & 0xff)
@@ -239,6 +298,7 @@ impl Term {
             rows,
             screen: vec![blank; cols * rows],
             scrollback: Vec::new(),
+            scroll_cap: recommended_scroll_cap(cols),
             cursor_x: 0,
             cursor_y: 0,
             pending_wrap: false,
@@ -334,10 +394,30 @@ impl Term {
             line.pop();
         }
         self.scrollback.push(line);
-        if self.scrollback.len() > SCROLL_CAP {
-            let extra = self.scrollback.len() - SCROLL_CAP;
+        self.trim_scrollback();
+    }
+
+    fn trim_scrollback(&mut self) {
+        if self.scrollback.len() > self.scroll_cap {
+            let extra = self.scrollback.len() - self.scroll_cap;
             self.scrollback.drain(0..extra);
         }
+    }
+
+    pub(crate) fn scroll_cap(&self) -> usize {
+        self.scroll_cap
+    }
+
+    pub(crate) fn set_scroll_cap(&mut self, rows: usize) {
+        self.scroll_cap = clamp_scroll_cap(rows);
+        self.trim_scrollback();
+    }
+
+    /// Re-probe RAM/CPU for the current width, scaled by `host_factor`.
+    pub(crate) fn refresh_scroll_cap(&mut self, host_factor: f32) {
+        let factor = sanitize_host_factor(host_factor);
+        let rows = (recommended_scroll_cap(self.cols) as f32 * factor) as usize;
+        self.set_scroll_cap(rows);
     }
 
     pub(crate) fn feed(&mut self, bytes: &[u8]) {
@@ -1975,6 +2055,54 @@ mod tests {
         term.line_cells(0, &mut cells);
         assert_eq!(cells[0].cp, 0xF0A0);
         assert_eq!(cells[0].fg, (10 << 16) | (20 << 8) | 30);
+    }
+
+    #[test]
+    fn scroll_cap_defaults_when_memory_is_unknown() {
+        assert_eq!(scroll_cap_for(None, 8, 80), SCROLL_CAP_DEFAULT);
+    }
+
+    #[test]
+    fn scroll_cap_never_exceeds_max_with_huge_memory() {
+        assert_eq!(scroll_cap_for(Some(u64::MAX), usize::MAX, 1), SCROLL_CAP_MAX);
+    }
+
+    #[test]
+    fn scroll_cap_never_drops_below_min_with_no_memory() {
+        assert_eq!(scroll_cap_for(Some(0), 0, 0), SCROLL_CAP_MIN);
+    }
+
+    #[test]
+    fn scroll_cap_shrinks_with_fewer_cpus() {
+        let gib = 1u64 << 30;
+        assert!(scroll_cap_for(Some(gib), 1, 80) < scroll_cap_for(Some(gib), 8, 80));
+    }
+
+    #[test]
+    fn host_factor_rejects_non_finite_and_out_of_range() {
+        assert_eq!(sanitize_host_factor(f32::NAN), HOST_FACTOR_MAX);
+        assert_eq!(sanitize_host_factor(f32::INFINITY), HOST_FACTOR_MAX);
+        assert_eq!(sanitize_host_factor(-3.0), HOST_FACTOR_MIN);
+        assert_eq!(sanitize_host_factor(9.0), HOST_FACTOR_MAX);
+    }
+
+    #[test]
+    fn set_scroll_cap_clamps_and_trims_history() {
+        let mut term = Term::new(4, 1);
+        term.set_scroll_cap(SCROLL_CAP_MAX);
+        for _ in 0..(SCROLL_CAP_MIN + 50) {
+            term.feed(b"x\r\n");
+        }
+        term.set_scroll_cap(0);
+        assert_eq!(term.scroll_cap(), SCROLL_CAP_MIN);
+        assert_eq!(term.scrollback.len(), SCROLL_CAP_MIN);
+    }
+
+    #[test]
+    fn refresh_scroll_cap_stays_in_bounds_for_bad_factor() {
+        let mut term = Term::new(80, 24);
+        term.refresh_scroll_cap(f32::NAN);
+        assert!((SCROLL_CAP_MIN..=SCROLL_CAP_MAX).contains(&term.scroll_cap()));
     }
 
     #[test]
