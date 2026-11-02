@@ -116,6 +116,8 @@ pub struct WwnTermImage {
 
 struct Alt {
     screen: Vec<Cell>,
+    /// Soft-wrap continuation flags for the saved primary screen.
+    wrap_cont: Vec<bool>,
     cursor_x: usize,
     cursor_y: usize,
 }
@@ -144,6 +146,9 @@ pub struct Term {
     /// DEC autowrap (mode 7). On by default. A graphic past the last column
     /// wraps once. A following CR or LF does not add a second break.
     autowrap: bool,
+    /// `wrap_cont[y] == true` when row `y` is a soft-wrap continuation of `y-1`.
+    /// Carriage return walks to the start of that logical line; erase clears it.
+    wrap_cont: Vec<bool>,
     style: Style,
     alt: Option<Alt>,
     state: Vt,
@@ -303,6 +308,7 @@ impl Term {
             cursor_y: 0,
             pending_wrap: false,
             autowrap: true,
+            wrap_cont: vec![false; rows],
             style,
             alt: None,
             state: Vt::Ground,
@@ -379,6 +385,8 @@ impl Term {
         self.pending_wrap = false;
         self.scroll_top = 0;
         self.scroll_bottom = rows;
+        // Resize reflow drops soft-wrap marks; hosts should keep serial cols >= 80.
+        self.wrap_cont = vec![false; rows];
         if drop > 0 {
             self.kitty.scroll(0, old_rows, drop, true, rows);
         } else {
@@ -852,6 +860,7 @@ impl Term {
         }
         self.alt = Some(Alt {
             screen: self.screen.clone(),
+            wrap_cont: self.wrap_cont.clone(),
             cursor_x: self.cursor_x,
             cursor_y: self.cursor_y,
         });
@@ -867,6 +876,10 @@ impl Term {
     fn leave_alt(&mut self) {
         if let Some(alt) = self.alt.take() {
             self.screen = alt.screen;
+            self.wrap_cont = alt.wrap_cont;
+            if self.wrap_cont.len() != self.rows {
+                self.wrap_cont.resize(self.rows, false);
+            }
             self.cursor_x = alt.cursor_x.min(self.cols - 1);
             self.cursor_y = alt.cursor_y.min(self.rows - 1);
             self.pending_wrap = false;
@@ -945,7 +958,13 @@ impl Term {
         let width = display_width(ch);
         if self.pending_wrap {
             if self.autowrap {
-                self.newline();
+                // Soft wrap: next row continues this logical line (not a real LF).
+                self.pending_wrap = false;
+                self.cursor_x = 0;
+                self.index();
+                if self.cursor_y < self.wrap_cont.len() {
+                    self.wrap_cont[self.cursor_y] = true;
+                }
             } else {
                 self.pending_wrap = false;
             }
@@ -1015,6 +1034,18 @@ impl Term {
 
     fn carriage_return(&mut self) {
         self.pending_wrap = false;
+        // Walk to the first physical row of this soft-wrapped logical line so
+        // CR / systemd CR LF ESC M CR CSI K rewrite the whole status, not a
+        // continuation fragment (narrow phone grids wrap long serial lines).
+        while self.cursor_y > self.region_top()
+            && self
+                .wrap_cont
+                .get(self.cursor_y)
+                .copied()
+                .unwrap_or(false)
+        {
+            self.cursor_y -= 1;
+        }
         self.cursor_x = 0;
     }
 
@@ -1029,8 +1060,24 @@ impl Term {
     }
 
     fn newline(&mut self) {
-        self.carriage_return();
+        self.pending_wrap = false;
+        // Skip to the last physical row of this soft-wrap run, then move once
+        // onto a fresh logical row (clear its continuation mark).
+        let bottom = self.region_bottom();
+        while self.cursor_y + 1 < bottom
+            && self
+                .wrap_cont
+                .get(self.cursor_y + 1)
+                .copied()
+                .unwrap_or(false)
+        {
+            self.cursor_y += 1;
+        }
+        self.cursor_x = 0;
         self.index();
+        if self.cursor_y < self.wrap_cont.len() {
+            self.wrap_cont[self.cursor_y] = false;
+        }
     }
 
     fn reverse_index(&mut self) {
@@ -1089,12 +1136,26 @@ impl Term {
                 for cell in &mut self.screen[end - cols..end] {
                     *cell = blank;
                 }
+                if bottom > top + 1 {
+                    self.wrap_cont.copy_within(top + 1..bottom, top);
+                }
+                if bottom > top {
+                    self.wrap_cont[bottom - 1] = false;
+                    // Row that moved into `top` continued a line now scrolled away.
+                    self.wrap_cont[top] = false;
+                }
             } else {
                 let start = top * cols;
                 let end = bottom * cols;
                 self.screen.copy_within(start..end - cols, start + cols);
                 for cell in &mut self.screen[start..start + cols] {
                     *cell = blank;
+                }
+                if bottom > top + 1 {
+                    self.wrap_cont.copy_within(top..bottom - 1, top + 1);
+                }
+                if bottom > top {
+                    self.wrap_cont[top] = false;
                 }
             }
         }
@@ -1115,6 +1176,9 @@ impl Term {
         if dest < end {
             self.screen.copy_within(y * cols..end - count * cols, dest);
         }
+        if y + count < bottom {
+            self.wrap_cont.copy_within(y..bottom - count, y + count);
+        }
         self.clear_rows(y, y + count);
     }
 
@@ -1130,7 +1194,13 @@ impl Term {
         let src = (y + count) * cols;
         let end = bottom * cols;
         self.screen.copy_within(src..end, y * cols);
+        if y + count < bottom {
+            self.wrap_cont.copy_within(y + count..bottom, y);
+        }
         self.clear_rows(bottom - count, bottom);
+        if y < self.wrap_cont.len() {
+            self.wrap_cont[y] = false;
+        }
     }
 
     fn insert_blanks(&mut self, count: usize) {
@@ -1185,6 +1255,13 @@ impl Term {
         for cell in &mut self.screen[from..to] {
             *cell = blank;
         }
+        let lo = start.min(self.rows);
+        let hi = end.min(self.rows);
+        for y in lo..hi {
+            if y < self.wrap_cont.len() {
+                self.wrap_cont[y] = false;
+            }
+        }
     }
 
     fn clear_screen(&mut self) {
@@ -1192,6 +1269,7 @@ impl Term {
         for cell in &mut self.screen {
             *cell = blank;
         }
+        self.wrap_cont.fill(false);
     }
 
     fn archive_screen(&mut self) {
@@ -1250,6 +1328,20 @@ impl Term {
         for x in start..end {
             self.screen[y * self.cols + x] = blank;
         }
+        // From the start of a logical line, also wipe soft-wrap continuations
+        // so a shorter rewrite cannot leave a stale second half.
+        if (mode == 2 || (mode == 0 && self.cursor_x == 0))
+            && !self.wrap_cont.get(y).copied().unwrap_or(false)
+        {
+            let mut cont = y + 1;
+            while cont < self.region_bottom()
+                && self.wrap_cont.get(cont).copied().unwrap_or(false)
+            {
+                self.clear_row(cont);
+                self.wrap_cont[cont] = false;
+                cont += 1;
+            }
+        }
     }
 
     fn clear_row(&mut self, y: usize) {
@@ -1267,6 +1359,7 @@ impl Term {
         self.cursor_y = 0;
         self.pending_wrap = false;
         self.autowrap = true;
+        self.wrap_cont.fill(false);
         self.scroll_top = 0;
         self.scroll_bottom = self.rows;
         self.cursor_visible = true;
@@ -2370,4 +2463,129 @@ mod tests {
         term.feed(b"\n\n");
         assert_eq!(term.image_count(), 0);
     }
+
+    #[test]
+    fn carriage_return_overwrites_the_same_row() {
+        let mut term = Term::new(40, 4);
+        term.feed(b"[***] job one\r[ * ] job two");
+        assert_eq!(term.line_count(), 1);
+        let (text, _) = line_text(&term, 0);
+        assert!(text.starts_with("[ * ] job two"), "{text:?}");
+        assert!(!text.contains("job one"), "{text:?}");
+    }
+
+    /// systemd status throbber: `\r\r\nESC M\rCSI K` rewrites one row.
+    #[test]
+    fn systemd_reverse_index_rewrites_one_status_line() {
+        let mut term = Term::new(80, 8);
+        term.feed(b"[  OK  ] Finished Seed.\r\n");
+        term.feed(b"[***] (1 of 4) A start job is running for udev");
+        let after_first = term.line_count();
+        term.feed(b"\r\r\n\x1bM\r\x1b[K");
+        term.feed(b"[** ] (1 of 4) A start job is running for udev");
+        term.feed(b"\r\r\n\x1bM\r\x1b[K");
+        term.feed(b"[*  ] (2 of 4) A start job is running for mount");
+        assert_eq!(
+            term.line_count(),
+            after_first,
+            "throbber frames must share one row; got {} lines (scrollback={})",
+            term.line_count(),
+            term.scrollback.len()
+        );
+        let (last, _) = line_text(&term, term.line_count() - 1);
+        assert!(
+            last.contains("(2 of 4)") && last.contains("mount"),
+            "last row should be the final status, got {last:?}"
+        );
+        let (ok, _) = line_text(&term, 0);
+        assert!(ok.contains("Finished Seed"), "{ok:?}");
+    }
+
+    /// Narrow grid + long status soft-wraps; wrap-aware CR + erase must keep one
+    /// logical status (systemd / ncurses / Lualine on a phone-width Term).
+    #[test]
+    fn systemd_throbber_on_narrow_grid_rewrites_wrapped_status() {
+        let mut term = Term::new(40, 12);
+        term.feed(b"[  OK  ] Finished Seed.\r\n");
+        let status = b"[***] (1 of 4) A start job is running for Device Nodes in /dev (50s / no limit)";
+        assert!(status.len() > 40);
+        term.feed(status);
+        let after_first = term.line_count();
+        term.feed(b"\r\r\n\x1bM\r\x1b[K");
+        term.feed(b"[** ] (1 of 4) A start job is running for Device Nodes in /dev (51s / no limit)");
+        term.feed(b"\r\r\n\x1bM\r\x1b[K");
+        term.feed(b"[*  ] (2 of 4) A start job is running for All udev Devices (51s / no limit)");
+        assert_eq!(
+            term.line_count(),
+            after_first,
+            "wrapped throbber must not grow the line list"
+        );
+        let mut joined = String::new();
+        for i in 0..term.line_count() {
+            let (text, _) = line_text(&term, i);
+            joined.push_str(&text);
+            joined.push('\n');
+        }
+        assert!(
+            joined.contains("(2 of 4)") && joined.contains("udev"),
+            "final status missing in {joined:?}"
+        );
+        assert!(
+            !joined.contains("(1 of 4)"),
+            "stale status fragments remained in {joined:?}"
+        );
+        assert!(
+            !joined.contains("Device Nodes"),
+            "stale wrap tail remained in {joined:?}"
+        );
+    }
+
+    /// Same throbber once the cursor sits on the last viewport row (scroll case).
+    #[test]
+    fn systemd_reverse_index_at_bottom_does_not_grow_scrollback_per_frame() {
+        let mut term = Term::new(80, 4);
+        term.feed(b"line0\r\nline1\r\nline2\r\n");
+        term.feed(b"[***] status A");
+        assert_eq!(term.cursor_y, 3);
+        // First bottom LF may scroll the top row once; further frames must not.
+        term.feed(b"\r\r\n\x1bM\r\x1b[K");
+        term.feed(b"[** ] status B");
+        let scroll_after_first = term.scrollback.len();
+        let lines_after_first = term.line_count();
+        for (i, frame) in [
+            b"[*  ] status C".as_slice(),
+            b"[ **] status D".as_slice(),
+            b"[  *] status E".as_slice(),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            term.feed(b"\r\r\n\x1bM\r\x1b[K");
+            term.feed(frame);
+            assert_eq!(
+                term.scrollback.len(),
+                scroll_after_first,
+                "frame {i}: ESC M must not push another scrollback row"
+            );
+            assert_eq!(
+                term.line_count(),
+                lines_after_first,
+                "frame {i}: line count must stay flat"
+            );
+        }
+        let mut status_rows = 0usize;
+        for i in 0..term.line_count() {
+            let (text, _) = line_text(&term, i);
+            if text.contains("status") {
+                status_rows += 1;
+            }
+        }
+        assert_eq!(
+            status_rows, 1,
+            "only one status row may remain across throbber frames"
+        );
+        let (last, _) = line_text(&term, term.line_count() - 1);
+        assert!(last.contains("status E"), "{last:?}");
+    }
+
 }
