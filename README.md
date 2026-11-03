@@ -1,15 +1,48 @@
-# Wawona Terminal / libghostty-rs
+# Wawona Terminal
 
-Rust UniFFI grid for **Wawona Terminal**. Native UI frameworks paint cells.
+Native terminal for **macOS, iOS, iPadOS, tvOS, watchOS, visionOS, Android,
+Linux**. Same product can run **standalone** or **link into Wawona**.
 
-Same product split as **ToolbarKeys** and Wawona domain UniFFI:
+Shape matches **ToolbarKeys** and Wawona domain UniFFI:
 
-| Rust (this crate) | Native UI |
-|-------------------|-----------|
-| `GhosttySurface` / `TerminalSession` | `apple/Terminal/` (SwiftUI / UIKit / AppKit) |
-| `ghostty_*` / `wwn_term_*` C (optional) | `android/…/WawonaTerminalText.kt` |
-| | GTK / Watch SwiftUI hosts in Wawona L4 |
+| Layer | Owner |
+|-------|--------|
+| Grid / VT (**libghostty-rs**) | This repo: Rust UniFFI (`GhosttySurface` / `TerminalSession`) |
+| Optional C ABI | `include/ghostty.h` + `ghostty_*` (not the product contract) |
+| Native paint | `apple/Terminal/`, `android/…`, GTK hosts |
+| Toolbar keys | `github.com/Wawona/ToolbarKeys` (separate UniFFI; where supported) |
+| Machines chrome / PTY in app | Wawona L4 when bundled |
 
-Packaging / flake name: `github.com/Wawona/Ghostty` (`wwn-ghostty`).
+Konsole is based on a terminal library. **Wawona Terminal is based on
+libghostty-rs**: Rust grid, platform-native UI (AppKit, UIKit, SwiftUI,
+Watch, Compose, GTK). Not GhosttyKit. Not Zig. Not a second Ghostty GitHub
+repo.
 
-Do not link published GhosttyKit. Apple-mobile static only, min OS 13.0.
+## Layout
+
+```text
+Terminal/                 # this repo (flake input: terminal)
+  src/                    # libghostty-rs UniFFI + optional C exports
+  include/ghostty.h       # optional C ABI for low-level hosts
+  scripts/build-static.sh # out/<abi>/libghostty.a
+  apple/Terminal/         # SwiftUI / UIKit / AppKit views
+  android/…               # Compose text host
+```
+
+Wawona stages `apple/Terminal` into `.nix-deps/terminal/Terminal` the same way
+it stages ToolbarKeys `apple/Keyboard`.
+
+## Build static (libghostty-rs)
+
+```bash
+./scripts/build-static.sh macos
+# → out/macos/libghostty.a
+```
+
+Apple-mobile: static only, deployment target **13.0**. No product `.dylib`.
+
+## Credits
+
+- Name / role inspiration: Ghostty MIT (Mitchell Hashimoto et al.)
+- iOS embed UX start: Rootshell MIT (Kit Knox)
+- VT + UniFFI: this repo

@@ -3,7 +3,7 @@ name = "wawona-terminal"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "Wawona Terminal. VT screen and UniFFI session. Hosts draw the cells."
+description = "Wawona Terminal / libghostty-rs. UniFFI VT grid; native hosts paint cells."
 repository = "https://github.com/Wawona/Terminal"
 rust-version = "1.75"
 
