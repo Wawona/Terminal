@@ -3,15 +3,34 @@ name = "wawona-terminal"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "Wawona Terminal / libghostty-rs. UniFFI VT grid; native hosts paint cells."
+description = "Wawona Terminal. UniFFI + C over uzaaft/libghostty-rs (Ghostty VT); native hosts paint."
 repository = "https://github.com/Wawona/Terminal"
-rust-version = "1.75"
+rust-version = "1.90"
 
 [lib]
 name = "wawona_terminal"
 crate-type = ["lib", "staticlib", "cdylib"]
 
+[[bin]]
+name = "wawona-terminal"
+path = "src/bin/wawona-terminal.rs"
+required-features = ["standalone"]
+
+[features]
+default = []
+# Linux GTK standalone (`nix run .#terminal`). macOS uses AppKit Metal host.
+standalone = ["dep:gtk4", "dep:glib", "dep:libc"]
+# Nix builds: link prebuilt Ghostty VT (zig-built via flake) through pkg-config.
+# Skips libghostty-vt-sys build.rs fetching/building Ghostty with host zig.
+nix-ghostty-vt = ["libghostty-vt-sys/pkg-config"]
+
 [dependencies]
+# Real Ghostty VT via Rust API (https://github.com/uzaaft/libghostty-rs).
+# Pin master tip until a crates.io release tracks Zig 0.17 + iOS patches.
+libghostty-vt = { git = "https://github.com/uzaaft/libghostty-rs", package = "libghostty-vt", rev = "575ed6b8ceb79ffaf247ecf7e34333876b0d5be4" }
+# Direct -sys so Nix can enable `pkg-config` (transitive feature enable is awkward).
+libghostty-vt-sys = { git = "https://github.com/uzaaft/libghostty-rs", package = "libghostty-vt-sys", rev = "575ed6b8ceb79ffaf247ecf7e34333876b0d5be4" }
 uniffi = "0.30"
-flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"] }
-png = "0.17.16"
+gtk4 = { version = "0.9", optional = true }
+glib = { version = "0.20", optional = true }
+libc = { version = "0.2", optional = true }

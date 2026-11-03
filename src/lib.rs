@@ -1,20 +1,22 @@
-//! libghostty-rs: Wawona Terminal grid.
+//! Wawona Terminal grid.
 //!
-//! UniFFI (`GhosttySurface` / `TerminalSession`) to native UI frameworks
-//! (AppKit, UIKit, SwiftUI, Watch, Compose, GTK). Same split as ToolbarKeys.
-//! Optional C `ghostty_*` / `wwn_term_*` for low-level hosts. This crate does
-//! not link a GPU library; hosts paint cells.
+//! VT engine is [libghostty-vt](https://github.com/uzaaft/libghostty-rs) (safe
+//! Rust over Ghostty `libghostty-vt`). UniFFI (`GhosttySurface` /
+//! `TerminalSession`) and C `ghostty_surface_*` share that engine. Hosts paint
+//! cells (AppKit Metal, UIKit, Compose, GTK). This crate does not link a GPU.
 
-mod screen;
+mod cell;
+mod engine;
+mod ffi_surface;
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 uniffi::setup_scaffolding!("wawona_terminal");
 
-/// Live RAM/CPU scrollback recommendation (same probe as `Term::new`).
+/// Live RAM/CPU scrollback recommendation.
 #[uniffi::export]
 pub fn terminal_recommended_scrollback_cap(cols: u32) -> u32 {
-    u32::try_from(screen::recommended_scroll_cap(cols as usize)).unwrap_or(u32::MAX)
+    u32::try_from(engine::recommended_scroll_cap(cols)).unwrap_or(u32::MAX)
 }
 
 #[derive(uniffi::Record)]
@@ -51,7 +53,7 @@ pub struct TerminalImage {
 
 #[derive(uniffi::Object)]
 pub struct TerminalSession {
-    inner: Mutex<screen::Term>,
+    inner: engine::VtEngine,
 }
 
 #[uniffi::export]
@@ -59,96 +61,68 @@ impl TerminalSession {
     #[uniffi::constructor]
     pub fn new(cols: u32, rows: u32) -> Arc<Self> {
         Arc::new(Self {
-            inner: Mutex::new(screen::Term::new(cols as usize, rows as usize)),
+            inner: engine::VtEngine::new(cols, rows),
         })
     }
 
     pub fn resize(&self, cols: u32, rows: u32) {
-        if let Ok(mut term) = self.inner.lock() {
-            term.resize(cols as usize, rows as usize);
-            // Columns change bytes-per-row; re-probe available RAM/CPU.
-            term.refresh_scroll_cap(1.0);
-        }
+        self.inner.resize(cols, rows);
     }
 
     pub fn set_scrollback_cap(&self, rows: u32) {
-        if let Ok(mut term) = self.inner.lock() {
-            term.set_scroll_cap(rows as usize);
-        }
+        self.inner.set_scroll_cap(rows as usize);
     }
 
     pub fn scrollback_cap(&self) -> u32 {
-        self.inner
-            .lock()
-            .map(|term| u32::try_from(term.scroll_cap()).unwrap_or(u32::MAX))
-            .unwrap_or(0)
+        u32::try_from(self.inner.scroll_cap()).unwrap_or(u32::MAX)
     }
 
-    /// Re-probe RAM/CPU. `host_factor` in 0.25…1.0 for Low Power / thermal.
-    pub fn refresh_scrollback_cap(&self, host_factor: f32) {
-        if let Ok(mut term) = self.inner.lock() {
-            term.refresh_scroll_cap(host_factor);
-        }
+    /// Re-probe RAM/CPU. `host_factor` reserved for Low Power / thermal.
+    pub fn refresh_scrollback_cap(&self, _host_factor: f32) {
+        let cols = self.inner.cols();
+        let cap = engine::recommended_scroll_cap(cols);
+        self.inner.set_scroll_cap(cap);
     }
 
     pub fn feed(&self, bytes: Vec<u8>) {
-        if let Ok(mut term) = self.inner.lock() {
-            term.feed(&bytes);
-        }
+        self.inner.feed(&bytes);
     }
 
     pub fn take_reply(&self) -> Vec<u8> {
-        self.inner
-            .lock()
-            .map(|mut term| term.drain_reply())
-            .unwrap_or_default()
+        self.inner.take_reply()
     }
 
     pub fn lines(&self) -> Vec<TerminalLine> {
-        let Ok(term) = self.inner.lock() else {
-            return Vec::new();
-        };
-        term.styled_lines().into_iter().map(uniffi_line).collect()
+        self.inner
+            .styled_lines()
+            .into_iter()
+            .map(uniffi_line)
+            .collect()
     }
 
     pub fn lines_json(&self) -> String {
-        self.inner
-            .lock()
-            .map(|term| term.lines_json())
-            .unwrap_or_else(|_| "[]".to_string())
+        self.inner.lines_json()
     }
 
     pub fn encode_paste(&self, text: String) -> Vec<u8> {
-        self.inner
-            .lock()
-            .map(|term| term.encode_paste(&text))
-            .unwrap_or_else(|_| text.into_bytes())
+        self.inner.encode_paste(&text)
     }
 
     pub fn pointer(&self, button: u8, col: u32, row: u32, pressed: bool, motion: bool) {
-        if let Ok(mut term) = self.inner.lock() {
-            term.pointer(button, col, row, pressed, motion);
-        }
+        self.inner.pointer(button, col, row, pressed, motion);
     }
 
     pub fn title(&self) -> String {
-        self.inner
-            .lock()
-            .map(|term| term.title().to_string())
-            .unwrap_or_default()
+        self.inner.title()
     }
 
     pub fn set_cell_px(&self, width: u32, height: u32) {
-        if let Ok(mut term) = self.inner.lock() {
-            term.set_cell_px(width, height);
-        }
+        self.inner.set_cell_px(width, height);
     }
 
     pub fn images(&self) -> Vec<TerminalImage> {
-        let Ok(term) = self.inner.lock() else {
-            return Vec::new();
-        };
-        term.placed_images()
+        self.inner
+            .placed_images()
             .into_iter()
             .map(|image| TerminalImage {
                 id: image.id,
@@ -167,7 +141,7 @@ impl TerminalSession {
     }
 }
 
-fn uniffi_line(line: screen::StyledLine) -> TerminalLine {
+fn uniffi_line(line: engine::StyledLine) -> TerminalLine {
     TerminalLine {
         spans: line
             .spans
@@ -186,7 +160,7 @@ fn uniffi_line(line: screen::StyledLine) -> TerminalLine {
     }
 }
 
-/// Product UniFFI surface (libghostty-rs). Same VT as [`TerminalSession`].
+/// Product UniFFI surface. Same VT as [`TerminalSession`].
 #[derive(uniffi::Object)]
 pub struct GhosttySurface {
     session: Arc<TerminalSession>,
@@ -249,3 +223,6 @@ impl GhosttySurface {
         self.session.scrollback_cap()
     }
 }
+
+// Re-export cell layout for hosts that compile against this crate.
+pub use cell::WwnTermCell;

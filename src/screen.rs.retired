@@ -76,7 +76,6 @@ struct Cell {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-#[repr(C)]
 pub struct WwnTermCell {
     pub cp: u32,
     pub fg: u32,
@@ -2594,6 +2593,7 @@ mod tests {
 // Same Term as wwn_term_*. Native UI owns chrome; this owns the grid.
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct GhosttyCell {
     pub cp: u32,
     pub fg: u32,

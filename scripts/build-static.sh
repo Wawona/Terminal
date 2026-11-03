@@ -52,8 +52,28 @@ case "${ABI}" in
   macos|macos-x86_64) export MACOSX_DEPLOYMENT_TARGET="${APPLE_MIN}" ;;
 esac
 
-echo "+ cargo build -p wawona-terminal --release --target ${TARGET}"
-if ! cargo build -p wawona-terminal --release --target "${TARGET}" 2>"${OUT}/build.log"; then
+# When Nix supplies Ghostty VT (PKG_CONFIG_PATH / nix-ghostty-vt), skip cargo zig.
+FEATURES=( )
+if [[ -n "${PKG_CONFIG_PATH:-}" ]] || [[ "${WAWONA_TERMINAL_NIX_VT:-0}" == "1" ]]; then
+  FEATURES+=( --features nix-ghostty-vt )
+fi
+echo "+ cargo build -p wawona-terminal --release --target ${TARGET} ${FEATURES[*]:-}"
+# Standalone / product hosts need the real libghostty-rs grid. Stub empty
+# viewport looks like a "working" app with blank Metal/GTK. Fail closed when
+# WAWONA_TERMINAL_FAIL_STUB=1 (nix run .#terminal) or ABI is macos*.
+FAIL_STUB=0
+if [[ "${WAWONA_TERMINAL_FAIL_STUB:-0}" == "1" ]]; then
+  FAIL_STUB=1
+fi
+case "${ABI}" in
+  macos|macos-x86_64) FAIL_STUB=1 ;;
+esac
+if ! cargo build -p wawona-terminal --release --target "${TARGET}" "${FEATURES[@]}" 2>"${OUT}/build.log"; then
+  if [[ "${FAIL_STUB}" -eq 1 ]]; then
+    echo "FAIL: cargo target ${TARGET} (real libghostty-rs required)" >&2
+    tail -40 "${OUT}/build.log" || true
+    exit 1
+  fi
   echo "warn: cargo target ${TARGET} failed; building host stub archive" >&2
   tail -20 "${OUT}/build.log" || true
   STUB_C="${ROOT}/bootstrap/ghostty_stub.c"
