@@ -106,8 +106,9 @@ final class GhosttyGpuView: MTKView, MTKViewDelegate {
     private var cache: [UInt32: UInt32] = [:]
     private var nextSlot: UInt32 = 1
     private let atlasSide = 16
-    private let glyphW: Int = 16
-    private let glyphH: Int = 32
+    private var glyphW: Int = 16
+    private var glyphH: Int = 32
+    private var atlasScale: Int = 1
     private var cellW: Float = 8
     private var cellH: Float = 16
 
@@ -117,11 +118,27 @@ final class GhosttyGpuView: MTKView, MTKViewDelegate {
         delegate = self
         isPaused = true
         enableSetNeedsDisplay = true
+        autoResizeDrawable = false
         colorPixelFormat = .bgra8Unorm
         clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
         framebufferOnly = true
         guard let device else { return }
         queue = device.makeCommandQueue()
+        rebuildAtlas(device: device, scale: 2)
+    }
+
+    func syncBackingScale(_ scale: CGFloat) {
+        let s = max(1, Int(scale.rounded()))
+        guard s != atlasScale, let device else { return }
+        rebuildAtlas(device: device, scale: s)
+    }
+
+    private func rebuildAtlas(device: MTLDevice, scale: Int) {
+        atlasScale = max(1, scale)
+        glyphW = 16 * atlasScale
+        glyphH = 32 * atlasScale
+        cache.removeAll()
+        nextSlot = 1
         atlas = Self.makeAtlas(device, glyphW: glyphW, glyphH: glyphH, atlasSide: atlasSide)
         pipeline = Self.makePipeline(
             device, pixelFormat: colorPixelFormat, atlasSide: atlasSide, glyphW: glyphW)
@@ -283,19 +300,19 @@ final class GhosttyGpuView: MTKView, MTKViewDelegate {
           float2 ndc = float2(-1.0, 1.0) + float2(float(col) + g.x, -(float(row) + g.y)) * step;
           uint slot = cell.slot;
           float side = \(side).0;
-          // Stamp atlas is top-down; sample with flipped V so glyphs read upright.
-          float2 uv = (float2(slot % \(side)u, slot / \(side)u) + float2(g.x, 1.0 - g.y)) / side;
+          // Stamp atlas is Metal top-down (CGContext flipped at write time).
+          float2 uv = (float2(slot % \(side)u, slot / \(side)u) + g) / side;
           VOut o; o.pos = float4(ndc, 0, 1); o.uv = uv; o.fg = unpack(cell.fg); o.bg = unpack(cell.bg); o.attr = cell.attr;
           return o;
         }
         fragment float4 ghostty_term_fs(VOut in [[stage_in]], texture2d<float> atlas [[texture(0)]],
                                     constant Dim &d [[buffer(0)]]) {
-          constexpr sampler s(filter::nearest, address::clamp_to_edge);
+          constexpr sampler s(filter::linear, address::clamp_to_edge);
           float m = atlas.sample(s, in.uv).r;
           if ((in.attr & 1u) != 0u) m = max(m, atlas.sample(s, in.uv + float2(\(boldUV), 0)).r);
           if ((in.attr & 16u) != 0u && d.phase == 0u) m = 0.0;
           float4 c = mix(in.bg, in.fg, step(0.28, m));
-          float2 local = float2(fract(in.uv.x * \(side).0), 1.0 - fract(in.uv.y * \(side).0));
+          float2 local = fract(in.uv * \(side).0);
           if ((in.attr & 8u) != 0u && local.y > 0.86) c = in.fg;
           if ((in.attr & 32u) != 0u && abs(local.y - 0.5) < 0.07) c = in.fg;
           return c;
@@ -317,6 +334,7 @@ final class GhosttyGpuView: MTKView, MTKViewDelegate {
 
 final class StandaloneTermSurface: NSView {
     var onReply: ((Data) -> Void)?
+    var onResize: ((UInt32, UInt32) -> Void)?
 
     private var term: OpaquePointer?
     private let gpu = GhosttyGpuView(frame: .zero, device: nil)
@@ -388,6 +406,7 @@ final class StandaloneTermSurface: NSView {
     private func syncDrawableScale() {
         let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
         gpu.layer?.contentsScale = scale
+        gpu.syncBackingScale(scale)
         let w = max(1, bounds.width * scale)
         let h = max(1, bounds.height * scale)
         gpu.drawableSize = CGSize(width: w, height: h)
@@ -429,6 +448,7 @@ final class StandaloneTermSurface: NSView {
         cols = nextCols
         rows = nextRows
         ghostty_surface_resize(term, cols, rows)
+        onResize?(cols, rows)
         redraw()
     }
 
@@ -471,6 +491,9 @@ final class StandaloneAppDelegate: NSObject, NSApplicationDelegate {
         let surface = StandaloneTermSurface(frame: NSRect(x: 0, y: 0, width: 900, height: 560))
         surface.onReply = { [weak self] data in
             self?.writeMaster(data)
+        }
+        surface.onResize = { [weak self] cols, rows in
+            self?.setWinsize(cols: cols, rows: rows)
         }
         self.surface = surface
 
@@ -533,6 +556,18 @@ final class StandaloneAppDelegate: NSObject, NSApplicationDelegate {
                 _ = write(master, base, data.count)
             }
         }
+    }
+
+    private func setWinsize(cols: UInt32, rows: UInt32) {
+        let fd = master
+        guard fd >= 0 else { return }
+        var win = winsize(
+            ws_row: UInt16(min(rows, UInt32(UInt16.max))),
+            ws_col: UInt16(min(cols, UInt32(UInt16.max))),
+            ws_xpixel: 0,
+            ws_ypixel: 0
+        )
+        _ = ioctl(fd, TIOCSWINSZ, &win)
     }
 }
 

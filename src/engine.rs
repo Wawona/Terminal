@@ -443,8 +443,12 @@ fn publish<'a>(
                 continue;
             };
             let style = cell.style().unwrap_or_else(|_| Style::default());
-            let fg = resolve_color(style.fg_color, default_fg, &palette);
-            let bg = resolve_color(style.bg_color, default_bg, &palette);
+            let mut fg = resolve_color(style.fg_color, default_fg, &palette);
+            let mut bg = resolve_color(style.bg_color, default_bg, &palette);
+            // SGR reverse video (fastfetch blocks, vim, …). Swap before paint.
+            if style.inverse {
+                std::mem::swap(&mut fg, &mut bg);
+            }
             let mut attrs = 0u32;
             if style.bold {
                 attrs |= ATTR_BOLD;
@@ -464,10 +468,14 @@ fn publish<'a>(
             if style.strikethrough {
                 attrs |= ATTR_STRIKE;
             }
-            let cp = graphemes.first().copied().unwrap_or(' ') as u32;
+            let cp = if style.invisible {
+                b' ' as u32
+            } else {
+                graphemes.first().copied().unwrap_or(' ') as u32
+            };
             cells.push(WwnTermCell { cp, fg, bg, attrs });
 
-            let text: String = if graphemes.is_empty() {
+            let text: String = if graphemes.is_empty() || style.invisible {
                 " ".into()
             } else {
                 graphemes.iter().collect()
@@ -518,12 +526,31 @@ fn publish<'a>(
         .map(|mut b| std::mem::take(&mut *b))
         .unwrap_or_default();
 
-    let rows_n = lines.len().max(1) as u16;
-    let cols = if cells.is_empty() {
-        snap.lock().map(|s| s.cols).unwrap_or(80)
-    } else {
-        (cells.len() / rows_n as usize).max(1) as u16
-    };
+    // Prefer last Resize size so the Metal grid stays cols×rows (pad blanks).
+    let (cols, rows_n) = snap
+        .lock()
+        .map(|s| (s.cols.max(1), s.rows.max(1)))
+        .unwrap_or((80, 24));
+    let need = (cols as usize).saturating_mul(rows_n as usize);
+    if cells.len() < need {
+        cells.resize(
+            need,
+            WwnTermCell {
+                cp: b' ' as u32,
+                fg: default_fg,
+                bg: default_bg,
+                attrs: 0,
+            },
+        );
+    } else if cells.len() > need {
+        cells.truncate(need);
+    }
+    while lines.len() < rows_n as usize {
+        lines.push(StyledLine::default());
+    }
+    if lines.len() > rows_n as usize {
+        lines.truncate(rows_n as usize);
+    }
 
     if let Ok(mut s) = snap.lock() {
         s.cols = cols;
