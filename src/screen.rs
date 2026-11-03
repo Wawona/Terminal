@@ -2589,3 +2589,109 @@ mod tests {
     }
 
 }
+
+// --- Product ABI: ghostty_* (Wawona Terminal hosts) ---
+// Same Term as wwn_term_*. Native UI owns chrome; this owns the grid.
+
+#[repr(C)]
+pub struct GhosttyCell {
+    pub cp: u32,
+    pub fg: u32,
+    pub bg: u32,
+    pub attrs: u32,
+}
+
+#[no_mangle]
+pub extern "C" fn ghostty_init() -> i32 {
+    0
+}
+
+#[no_mangle]
+pub extern "C" fn ghostty_shutdown() {}
+
+#[no_mangle]
+pub extern "C" fn ghostty_surface_new(cols: u32, rows: u32) -> *mut Term {
+    wwn_term_new(cols, rows)
+}
+
+#[no_mangle]
+pub extern "C" fn ghostty_surface_free(s: *mut Term) {
+    wwn_term_free(s);
+}
+
+#[no_mangle]
+pub extern "C" fn ghostty_surface_resize(s: *mut Term, cols: u32, rows: u32) {
+    wwn_term_resize(s, cols, rows);
+}
+
+#[no_mangle]
+pub extern "C" fn ghostty_surface_write(s: *mut Term, bytes: *const u8, len: usize) {
+    wwn_term_feed(s, bytes, len);
+}
+
+#[no_mangle]
+pub extern "C" fn ghostty_surface_key(
+    _s: *mut Term,
+    _keycode: u32,
+    _mods: u32,
+    _down: i32,
+) {
+}
+
+#[no_mangle]
+pub extern "C" fn ghostty_surface_take_reply(s: *mut Term, buf: *mut u8, cap: usize) -> usize {
+    wwn_term_take_reply(s, buf, cap)
+}
+
+#[no_mangle]
+pub extern "C" fn ghostty_surface_viewport(
+    s: *const Term,
+    origin: u32,
+    out: *mut GhosttyCell,
+    cap: u32,
+    cols: *mut u32,
+    rows: *mut u32,
+) -> u32 {
+    wwn_term_viewport(s, origin, out as *mut WwnTermCell, cap, cols, rows)
+}
+
+#[no_mangle]
+pub extern "C" fn ghostty_surface_origin(s: *const Term) -> u32 {
+    wwn_term_origin(s)
+}
+
+#[no_mangle]
+pub extern "C" fn ghostty_surface_title(s: *const Term, out: *mut u8, cap: u32) -> u32 {
+    wwn_term_title(s, out, cap)
+}
+
+#[no_mangle]
+pub extern "C" fn ghostty_surface_set_cell_px(s: *mut Term, width: u32, height: u32) {
+    wwn_term_set_cell_px(s, width, height);
+}
+
+#[no_mangle]
+pub extern "C" fn ghostty_surface_pointer(
+    s: *mut Term,
+    button: u8,
+    col: u32,
+    row: u32,
+    pressed: i32,
+    motion: i32,
+) {
+    wwn_term_pointer(s, button, col, row, pressed, motion);
+}
+
+#[no_mangle]
+pub extern "C" fn ghostty_surface_encode_paste(
+    s: *const Term,
+    bytes: *const u8,
+    len: usize,
+) -> *mut std::os::raw::c_char {
+    wwn_term_encode_paste(s, bytes, len)
+}
+
+#[no_mangle]
+pub extern "C" fn ghostty_string_free(ptr: *mut std::os::raw::c_char) {
+    wwn_term_string_free(ptr);
+}
