@@ -111,7 +111,8 @@ else
   if [[ ! -f "${LIB}" ]]; then
     LIB=$(find "${CARGO_TARGET_DIR}" -name 'libwawona_terminal.a' | head -1)
   fi
-  cp -f "${LIB}" "${OUT}/libghostty.a"
+  cp -f "${LIB}" "${OUT}/libwawona_terminal.a"
+  cp -f "${OUT}/libwawona_terminal.a" "${OUT}/libghostty.a"
 fi
 
 if ! (nm -g "${OUT}/libghostty.a" 2>/dev/null || true) | grep -q 'ghostty_init'; then
@@ -120,5 +121,5 @@ if ! (nm -g "${OUT}/libghostty.a" 2>/dev/null || true) | grep -q 'ghostty_init';
     exit 1
   fi
 fi
-echo "OK ${OUT}/libghostty.a"
-ls -la "${OUT}/libghostty.a"
+echo "OK ${OUT}/libwawona_terminal.a (alias libghostty.a)"
+ls -la "${OUT}/libwawona_terminal.a" "${OUT}/libghostty.a"

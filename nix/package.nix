@@ -154,9 +154,11 @@ let
         fi
         chmod -R u+w "$WORK"
         chmod +x "$WORK/scripts/"*.sh
+        mkdir -p "$WORK/out/macos/include"
         if [[ -f "$WAWONA_TERMINAL_NIX_LIB/lib/libwawona_terminal.a" ]]; then
-          mkdir -p "$WORK/out/macos/include"
           cp -f "$WAWONA_TERMINAL_NIX_LIB/lib/libwawona_terminal.a" "$WORK/out/macos/"
+          # Alias for older scripts that still look for libghostty.a.
+          cp -f "$WORK/out/macos/libwawona_terminal.a" "$WORK/out/macos/libghostty.a"
           if [[ -f "$WAWONA_TERMINAL_NIX_LIB/include/ghostty.h" ]]; then
             cp -f "$WAWONA_TERMINAL_NIX_LIB/include/ghostty.h" "$WORK/out/macos/include/"
           else
@@ -166,8 +168,8 @@ let
           export WAWONA_TERMINAL_FAIL_STUB=1
           ( cd "$WORK" && cargo build -p wawona-terminal --release \
               --features nix-ghostty-vt --target aarch64-apple-darwin )
-          mkdir -p "$WORK/out/macos/include"
           find "$WORK/target" -name 'libwawona_terminal.a' -exec cp -f {} "$WORK/out/macos/" \;
+          cp -f "$WORK/out/macos/libwawona_terminal.a" "$WORK/out/macos/libghostty.a"
           cp -f "$WORK/include/ghostty.h" "$WORK/out/macos/include/"
         fi
         WAWONA_TERMINAL_APP="$APP" WAWONA_TERMINAL_NO_OPEN=1 \

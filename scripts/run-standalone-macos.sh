@@ -3,15 +3,18 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="${WAWONA_TERMINAL_APP:-/tmp/WawonaTerminal.app}"
-LIB="$ROOT/out/macos/libghostty.a"
+# Prefer Nix/cargo product archive; libghostty.a is the build-static.sh alias.
+if [[ -f "$ROOT/out/macos/libwawona_terminal.a" ]]; then
+  LIB="$ROOT/out/macos/libwawona_terminal.a"
+elif [[ -f "$ROOT/out/macos/libghostty.a" ]]; then
+  LIB="$ROOT/out/macos/libghostty.a"
+else
+  echo "missing out/macos/libwawona_terminal.a (or libghostty.a); nix build .#terminal or scripts/build-static.sh macos" >&2
+  exit 1
+fi
 SRC="$ROOT/apple/Standalone/StandaloneTermSurface.swift"
 PTY_C="$ROOT/apple/Standalone/pty_spawn.c"
 OBJDIR="$(mktemp -d /tmp/wawona-term-build.XXXXXX)"
-
-if [[ ! -f "$LIB" ]]; then
-  echo "missing $LIB; run scripts/build-static.sh macos" >&2
-  exit 1
-fi
 
 rm -rf "$OUT"
 mkdir -p "$OUT/Contents/MacOS" "$OUT/Contents/Resources"
