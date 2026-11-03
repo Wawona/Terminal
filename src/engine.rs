@@ -10,7 +10,7 @@ use crate::cell::{
 use libghostty_vt::render::{CellIterator, Dirty, RowIterator};
 use libghostty_vt::style::{RgbColor, Style, StyleColor, Underline};
 use libghostty_vt::terminal::ScrollViewport;
-use libghostty_vt::{RenderState, Terminal, TerminalOptions, paste};
+use libghostty_vt::{RenderState, Terminal, paste};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -286,13 +286,10 @@ impl Drop for VtEngine {
 }
 
 fn worker(rx: Receiver<Cmd>, snap: Arc<Mutex<Snapshot>>, cols: u16, rows: u16) {
-    let Ok(mut terminal) = Terminal::new(TerminalOptions {
-        cols,
-        rows,
-        max_scrollback: DEFAULT_SCROLLBACK,
-    }) else {
+    let Ok(mut terminal) = Terminal::new(cols, rows) else {
         return;
     };
+    let _ = terminal.set_scrollback_max_lines(Some(DEFAULT_SCROLLBACK));
 
     let reply_buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
     let reply_cb = Arc::clone(&reply_buf);
@@ -339,23 +336,7 @@ fn worker(rx: Receiver<Cmd>, snap: Arc<Mutex<Snapshot>>, cols: u16, rows: u16) {
             }
             Cmd::SetScrollCap(cap) => {
                 scroll_cap = cap;
-                let (cols, rows) = snap
-                    .lock()
-                    .map(|s| (s.cols, s.rows))
-                    .unwrap_or((80, 24));
-                if let Ok(mut next) = Terminal::new(TerminalOptions {
-                    cols,
-                    rows,
-                    max_scrollback: scroll_cap,
-                }) {
-                    let reply_cb = Arc::clone(&reply_buf);
-                    let _ = next.on_pty_write(move |_term, data| {
-                        if let Ok(mut buf) = reply_cb.lock() {
-                            buf.extend_from_slice(data);
-                        }
-                    });
-                    terminal = next;
-                }
+                let _ = terminal.set_scrollback_max_lines(Some(cap));
             }
             Cmd::ScrollToOrigin(origin) => {
                 if origin == 0 {
@@ -383,9 +364,10 @@ fn worker(rx: Receiver<Cmd>, snap: Arc<Mutex<Snapshot>>, cols: u16, rows: u16) {
                     if let Ok(mut event) = libghostty_vt::mouse::Event::new() {
                         event.set_action(action);
                         event.set_button(Some(button_from_u8(button)));
+                        // Tip MousePosition is cell-space f32.
                         event.set_position(libghostty_vt::mouse::Position {
-                            x: col as i32,
-                            y: row as i32,
+                            x: col as f32,
+                            y: row as f32,
                         });
                         let mut out = Vec::new();
                         if enc.encode_to_vec(&event, &mut out).is_ok() && !out.is_empty() {
@@ -457,11 +439,9 @@ fn publish(
         let mut line = StyledLine::default();
         let mut cur: Option<StyledSpan> = None;
         while let Some(cell) = cells_it.next() {
-            let mut gbuf = ['\0'; 8];
-            let Ok(glen) = cell.graphemes(&mut gbuf) else {
+            let Ok(graphemes) = cell.graphemes() else {
                 continue;
             };
-            let graphemes = &gbuf[..glen];
             let style = cell.style().unwrap_or_else(|_| Style::default());
             let fg = resolve_color(style.fg_color, default_fg, &palette);
             let bg = resolve_color(style.bg_color, default_bg, &palette);
@@ -529,7 +509,10 @@ fn publish(
     }
     let _ = snapshot.set_dirty(Dirty::Clean);
 
-    let title = terminal.title().unwrap_or("").to_string();
+    let title = terminal
+        .title()
+        .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
+        .unwrap_or_default();
     let reply = reply_buf
         .lock()
         .map(|mut b| std::mem::take(&mut *b))
@@ -594,8 +577,8 @@ fn json_str(s: &str) -> String {
 /// Recommend scrollback rows from host RAM.
 pub fn recommended_scroll_cap(cols: u32) -> usize {
     let cols = cols.max(1) as usize;
-    let bytes_per_row = cols.saturating_mul(16);
-    let avail = available_memory_bytes().unwrap_or(512 * 1024 * 1024);
+    let bytes_per_row = cols.saturating_mul(16).max(1);
+    let avail = available_memory_bytes().unwrap_or(512 * 1024 * 1024) as usize;
     let budget = (avail / 64).max(64 * 1024);
     (budget / bytes_per_row).clamp(1_000, 100_000)
 }
