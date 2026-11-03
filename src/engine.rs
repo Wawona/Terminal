@@ -406,12 +406,12 @@ fn button_from_u8(button: u8) -> libghostty_vt::mouse::Button {
     }
 }
 
-fn publish(
+fn publish<'a>(
     snap: &Arc<Mutex<Snapshot>>,
-    terminal: &Terminal,
-    render_state: &mut RenderState,
-    row_iter: &mut RowIterator,
-    cell_iter: &mut CellIterator,
+    terminal: &Terminal<'a, 'a>,
+    render_state: &mut RenderState<'a>,
+    row_iter: &mut RowIterator<'a>,
+    cell_iter: &mut CellIterator<'a>,
     reply_buf: &Arc<Mutex<Vec<u8>>>,
     cell_w: u32,
     cell_h: u32,
