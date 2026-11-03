@@ -1,27 +1,15 @@
-# Wawona Terminal
+# Wawona Terminal / libghostty-rs
 
-Rust VT screen for Wawona. UniFFI exposes styled lines. Each host draws those
-lines with its own toolkit.
+Rust UniFFI grid for **Wawona Terminal**. Native UI frameworks paint cells.
 
-| Host | View |
-|---|---|
-| iOS, iPadOS, tvOS, visionOS, macOS | SwiftUI text scroll in `apple/Terminal` |
-| Android | Compose in `android/` |
-| Linux | GTK `TextView`, crate feature `gtk` |
+Same product split as **ToolbarKeys** and Wawona domain UniFFI:
 
-This is not foot and not weston-terminal. Those stay Wayland clients. The
-iOS native shell is this terminal.
+| Rust (this crate) | Native UI |
+|-------------------|-----------|
+| `GhosttySurface` / `TerminalSession` | `apple/Terminal/` (SwiftUI / UIKit / AppKit) |
+| `ghostty_*` / `wwn_term_*` C (optional) | `android/…/WawonaTerminalText.kt` |
+| | GTK / Watch SwiftUI hosts in Wawona L4 |
 
-Wawona compiles `apple/Terminal` from this tree. Do not copy that Swift back
-into Wawona. Generated UniFFI bindings are a Nix output. Do not commit them.
+Packaging / flake name: `github.com/Wawona/Ghostty` (`wwn-ghostty`).
 
-The crate does not depend on Wawona or iland. iOS deployment stays 13.0.
-watchOS draws the same SwiftUI text. It does not link Metal.
-
-The face is DejaVu Sans Mono patched with Nerd Fonts, shipped by Wawona's
-font package. Apple system fonts do not include those icons.
-
-```bash
-cargo test
-cargo build --features gtk   # Linux text view
-```
+Do not link published GhosttyKit. Apple-mobile static only, min OS 13.0.

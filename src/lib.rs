@@ -1,7 +1,9 @@
-//! Wawona Terminal.
+//! libghostty-rs: Wawona Terminal grid.
 //!
-//! The screen is Rust. Hosts upload `wwn_term_viewport` and draw it on the GPU.
-//! This crate does not link a GPU library.
+//! UniFFI (`GhosttySurface` / `TerminalSession`) to native UI frameworks
+//! (AppKit, UIKit, SwiftUI, Watch, Compose, GTK). Same split as ToolbarKeys.
+//! Optional C `ghostty_*` / `wwn_term_*` for low-level hosts. This crate does
+//! not link a GPU library; hosts paint cells.
 
 mod screen;
 
@@ -181,5 +183,69 @@ fn uniffi_line(line: screen::StyledLine) -> TerminalLine {
                 strike: span.strike,
             })
             .collect(),
+    }
+}
+
+/// Product UniFFI surface (libghostty-rs). Same VT as [`TerminalSession`].
+#[derive(uniffi::Object)]
+pub struct GhosttySurface {
+    session: Arc<TerminalSession>,
+}
+
+#[uniffi::export]
+impl GhosttySurface {
+    #[uniffi::constructor]
+    pub fn new(cols: u32, rows: u32) -> Arc<Self> {
+        Arc::new(Self {
+            session: TerminalSession::new(cols, rows),
+        })
+    }
+
+    pub fn resize(&self, cols: u32, rows: u32) {
+        self.session.resize(cols, rows);
+    }
+
+    pub fn feed(&self, bytes: Vec<u8>) {
+        self.session.feed(bytes);
+    }
+
+    pub fn take_reply(&self) -> Vec<u8> {
+        self.session.take_reply()
+    }
+
+    pub fn lines(&self) -> Vec<TerminalLine> {
+        self.session.lines()
+    }
+
+    pub fn lines_json(&self) -> String {
+        self.session.lines_json()
+    }
+
+    pub fn encode_paste(&self, text: String) -> Vec<u8> {
+        self.session.encode_paste(text)
+    }
+
+    pub fn pointer(&self, button: u8, col: u32, row: u32, pressed: bool, motion: bool) {
+        self.session.pointer(button, col, row, pressed, motion);
+    }
+
+    pub fn title(&self) -> String {
+        self.session.title()
+    }
+
+    pub fn set_cell_px(&self, width: u32, height: u32) {
+        self.session.set_cell_px(width, height);
+    }
+
+    pub fn images(&self) -> Vec<TerminalImage> {
+        self.session.images()
+    }
+
+    pub fn refresh_scrollback_cap(&self, host_factor: f32) {
+        self.session.refresh_scrollback_cap(host_factor);
+    }
+
+    pub fn scrollback_cap(&self) -> u32 {
+        self.session.scrollback_cap()
     }
 }
