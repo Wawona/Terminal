@@ -47,6 +47,33 @@ final class GhosttySurfaceHost: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
+    /// Focus Present sits under flipped SwiftUI (`NSHostingView`). Ghostty
+    /// Metal is Y-up; without a Y flip the grid paints upside down. Match
+    /// `GhosttyGpuView` (viewport height=-th): layer affine only, never
+    /// `isFlipped` on the Metal host (AppKit then geometry-flips the layer).
+    private var hostIsFlipped: Bool {
+        var ancestor: NSView? = superview
+        while let view = ancestor {
+            if view.isFlipped { return true }
+            ancestor = view.superview
+        }
+        return false
+    }
+
+    private func applyZigHostFlipIfNeeded() {
+        guard let child = zigChild else { return }
+        child.wantsLayer = true
+        guard let layer = child.layer else { return }
+        if hostIsFlipped {
+            // y' = height - y (top-left flipped host ↔ Metal Y-up drawable).
+            layer.setAffineTransform(
+                CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: child.bounds.height)
+            )
+        } else {
+            layer.setAffineTransform(.identity)
+        }
+    }
+
     var drawableSize: CGSize {
         get { gpuFallback.drawableSize }
         set { gpuFallback.drawableSize = newValue }
@@ -108,6 +135,7 @@ final class GhosttySurfaceHost: NSView {
         gpuFallback.frame = bounds
         zigChild?.frame = bounds
         if usesZigPaint {
+            applyZigHostFlipIfNeeded()
             restartZigIfNeeded()
         }
     }
@@ -135,6 +163,7 @@ final class GhosttySurfaceHost: NSView {
 
         if let zigHost {
             wwn_ghostty_surface_host_resize(zigHost, w, h, Double(scale))
+            applyZigHostFlipIfNeeded()
             wwn_ghostty_surface_host_draw(zigHost)
             startDisplayLink()
             return
@@ -153,6 +182,8 @@ final class GhosttySurfaceHost: NSView {
             return
         }
         zigHost = started
+        // Ghostty may replace/attach CAMetalLayer; flip after surface_new.
+        applyZigHostFlipIfNeeded()
         NSLog("GhosttySurfaceHost: zig paint via ghostty_surface_draw")
         startDisplayLink()
     }
