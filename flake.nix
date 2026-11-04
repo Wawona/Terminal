@@ -20,6 +20,8 @@
     zig2nix.url = "github:Cloudef/zig2nix";
     # Ghostty VT archive. Pin matches uzaaft/libghostty-rs GHOSTTY_COMMIT.
     ghostty.url = "github:ghostty-org/ghostty/521cf2c5d30bd48028ca61546c64e7913764073d";
+    # L3′ Zig GhosttyLib (Metal). Draw proof only until tip ABI swap.
+    wwn-ghostty.url = "github:Wawona/Ghostty/development";
   };
 
   outputs =
@@ -30,6 +32,7 @@
       rust-overlay,
       zig2nix,
       ghostty,
+      wwn-ghostty,
     }:
     flake-utils.lib.eachSystem flake-utils.lib.defaultSystems (
       system:
@@ -65,6 +68,7 @@
         # Official Ghostty flake builds libghostty-vt with Zig (`-Demit-lib-vt`).
         # Product VT core for Wawona Terminal / libghostty-rs pkg-config path.
         libghosttyVt = ghostty.packages.${system}.libghostty-vt;
+        wwnGhosttyPkgs = wwn-ghostty.packages.${system} or { };
 
         terminalPkg = pkgs.callPackage ./nix/package.nix {
           inherit rustPlatform libghosttyVt;
@@ -79,6 +83,12 @@
           wawona-terminal = terminalPkg;
           zig = zigPkg;
           libghostty-vt = libghosttyVt;
+        }
+        # Re-export Zig GhosttyLib + draw proof. Do not link into terminalPkg
+        # (Rust ghostty_surface_* ABI collides). Product paint: GhosttyGpu.
+        // pkgs.lib.optionalAttrs (wwnGhosttyPkgs ? libghostty-macos) {
+          libghostty-macos = wwnGhosttyPkgs.libghostty-macos;
+          libghostty-macos-draw-proof = wwnGhosttyPkgs.libghostty-macos-draw-proof;
         };
 
         apps = {
