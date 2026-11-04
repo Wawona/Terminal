@@ -8,8 +8,9 @@ import MetalKit
 /// Canonical Apple Metal atlas paint for Wawona Terminal.
 ///
 /// INTERIM atlas fallback (TermGpu / GhosttyGpu). Do not grow UV flips /
-/// stamp hacks. Used when `GhosttySurfaceHost` has no Zig archive
-/// (`WAWONA_LINK_LIBGHOSTTY` off). Not retired as default tip paint.
+/// stamp hacks. Used when Zig is not linked (`WAWONA_LINK_LIBGHOSTTY=0` /
+/// archive missing) or `GhosttySurfaceHost` start fails. Tip dogfood
+/// prefers Zig; this is fallback only.
 /// Zig path: `ghostty_surface_draw` via `GhosttySurfaceHost`.
 /// See `Ghostty/docs/METAL-SURFACE.md`.
 ///

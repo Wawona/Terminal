@@ -5,9 +5,9 @@ import Metal
 import QuartzCore
 
 /// macOS Terminal paint host. Phase 5: when Zig `libghostty-internal.a` is
-/// linked (`WAWONA_LINK_LIBGHOSTTY=1` → `WAWONA_HAS_LIBGHOSTTY`), paints via
+/// linked (tip default / staged → `WAWONA_HAS_LIBGHOSTTY`), paints via
 /// `ghostty_app_new` + `ghostty_surface_new(nsview)` + `ghostty_surface_draw`.
-/// Otherwise embeds interim `GhosttyGpuView` atlas (not retired as default).
+/// Falls back to interim `GhosttyGpuView` when `available==false` or start fails.
 final class GhosttySurfaceHost: NSView {
     private let gpuFallback = GhosttyGpuView(frame: .zero, device: nil)
     private var zigHost: OpaquePointer?
