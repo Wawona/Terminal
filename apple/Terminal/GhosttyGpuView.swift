@@ -7,14 +7,11 @@ import MetalKit
 
 /// Canonical Apple Metal atlas paint for Wawona Terminal.
 ///
-/// INTERIM (TermGpu / GhosttyGpu). Do not grow atlas features (UV flips,
-/// stamp hacks). Default paint (`WAWONA_GHOSTTY_GPU=1` / always on) until
-/// tip paints via Zig GhosttyLib `ghostty_surface_draw` (Rust VT is `wwn_term_*`).
-///
-/// TODO(metal-surface): retire after tip ABI swap. Archive + draw proof:
-/// `nix build github:Wawona/Ghostty/development#libghostty-macos-draw-proof`.
-/// Do not treat `out/macos/libghostty.a` (alias of libwawona_terminal.a) as done.
-/// See `Ghostty/docs/METAL-SURFACE.md` (ABI gap table).
+/// INTERIM atlas fallback (TermGpu / GhosttyGpu). Do not grow UV flips /
+/// stamp hacks. Used when `GhosttySurfaceHost` has no Zig archive
+/// (`WAWONA_LINK_LIBGHOSTTY` off). Not retired as default tip paint.
+/// Zig path: `ghostty_surface_draw` via `GhosttySurfaceHost`.
+/// See `Ghostty/docs/METAL-SURFACE.md`.
 ///
 /// Staged into Wawona like ToolbarKeys: `.nix-deps/terminal/Terminal`.
 /// Standalone macOS compiles this file next to `StandaloneTermSurface.swift`.
