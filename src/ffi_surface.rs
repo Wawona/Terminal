@@ -1,8 +1,9 @@
 //! C ABI for AppKit / Metal hosts (`ghostty_surface_*`, `wwn_term_*`).
-//! Backed by [`crate::engine::VtEngine`] (real libghostty-vt).
+//! Backed by [`super::engine::VtEngine`] (real libghostty-vt).
+//! `super::` so this file also compiles as Wawona `src/term/ffi_surface.rs`.
 
-use crate::cell::WwnTermCell;
-use crate::engine::VtEngine;
+use super::cell::WwnTermCell;
+use super::engine::VtEngine;
 use std::ffi::{CString, c_char};
 use std::os::raw::c_void;
 
@@ -263,7 +264,7 @@ pub extern "C" fn wwn_term_refresh_scrollback_cap(term: *mut c_void, host_factor
     };
     let factor = (host_factor_permille.clamp(250, 1000) as f32) / 1000.0;
     let cols = eng.cols();
-    let base = crate::engine::recommended_scroll_cap(cols);
+    let base = super::engine::recommended_scroll_cap(cols);
     let capped = ((base as f32) * factor).round() as usize;
     eng.set_scroll_cap(capped.clamp(1_000, 100_000));
 }

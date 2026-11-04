@@ -4,7 +4,8 @@
 //! `Terminal` is `!Send` / `!Sync`. Own it on one OS thread; UniFFI / C hosts
 //! talk through this Send-safe handle.
 
-use crate::cell::{
+// `super::` so this file also compiles as Wawona `src/term/engine.rs`.
+use super::cell::{
     ATTR_BLINK, ATTR_BOLD, ATTR_CURSOR, ATTR_DIM, ATTR_ITALIC, ATTR_STRIKE, ATTR_UNDERLINE,
     WwnTermCell, pack_rgb,
 };
