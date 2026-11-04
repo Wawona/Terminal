@@ -381,3 +381,68 @@ pub extern "C" fn wwn_term_image_rgba(
 ) -> u32 {
     0
 }
+
+fn cstring_owned(s: String) -> *mut c_char {
+    match CString::new(s) {
+        Ok(c) => c.into_raw(),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn wwn_term_string_free(ptr: *mut c_char) {
+    ghostty_string_free(ptr)
+}
+
+/// UniFFI-shaped lines JSON for a live term. Caller frees with
+/// `wwn_term_string_free`.
+#[no_mangle]
+pub extern "C" fn wwn_term_lines_json(term: *const c_void) -> *mut c_char {
+    let Some(eng) = engine_ref(term) else {
+        return std::ptr::null_mut();
+    };
+    cstring_owned(eng.lines_json())
+}
+
+/// One-shot: feed `bytes` into a throwaway VT of `cols`×`rows`, return lines
+/// JSON. Watch Terminal / Android guest console use this for off-session paint.
+#[no_mangle]
+pub extern "C" fn wwn_term_bytes_lines_json(
+    bytes: *const u8,
+    len: usize,
+    cols: u32,
+    rows: u32,
+) -> *mut c_char {
+    let eng = VtEngine::new(cols.max(1), rows.max(1));
+    if !bytes.is_null() && len > 0 {
+        let slice = unsafe { std::slice::from_raw_parts(bytes, len) };
+        eng.feed(slice);
+    }
+    cstring_owned(eng.lines_json())
+}
+
+#[no_mangle]
+pub extern "C" fn wwn_term_images_json(_term: *const c_void) -> *mut c_char {
+    // Kitty placements empty until real VT image path lands on this target.
+    cstring_owned("[]".into())
+}
+
+#[no_mangle]
+pub extern "C" fn wwn_term_bytes_images_json(
+    bytes: *const u8,
+    len: usize,
+    cols: u32,
+    rows: u32,
+    _cell_w: u32,
+    _cell_h: u32,
+) -> *mut c_char {
+    // Feed so OSC graphics side effects run when VT supports them; JSON still
+    // empty on stub / current Ghostty path (`placed_images` is empty).
+    let eng = VtEngine::new(cols.max(1), rows.max(1));
+    if !bytes.is_null() && len > 0 {
+        let slice = unsafe { std::slice::from_raw_parts(bytes, len) };
+        eng.feed(slice);
+    }
+    let _ = eng.placed_images();
+    cstring_owned("[]".into())
+}
