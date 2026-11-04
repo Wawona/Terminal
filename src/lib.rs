@@ -2,8 +2,9 @@
 //!
 //! VT engine is [libghostty-vt](https://github.com/uzaaft/libghostty-rs) (safe
 //! Rust over Ghostty `libghostty-vt`). UniFFI (`GhosttySurface` /
-//! `TerminalSession`) and C `ghostty_surface_*` share that engine. Hosts paint
+//! `TerminalSession`) and C `wwn_term_*` share that engine. Hosts paint
 //! cells (AppKit Metal, UIKit, Compose, GTK). This crate does not link a GPU.
+//! Zig GhosttyLib keeps `ghostty_surface_*` (Phase 5 rename).
 
 mod cell;
 mod engine;

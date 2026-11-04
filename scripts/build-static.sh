@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build Rust libghostty-rs static archive for one Wawona product ABI.
 # Usage: ./scripts/build-static.sh <abi>
-# Output: out/<abi>/libghostty.a (+ include/ghostty.h)
+# Output: out/<abi>/libghostty.a (+ include/wwn_term.h, ghostty.h shim)
 #
 # Fail closed: never emit an empty stub archive. Real libghostty-rs only.
 set -euo pipefail
@@ -41,6 +41,7 @@ esac
 
 OUT="${OUT_ROOT}/${ABI}"
 mkdir -p "${OUT}/include"
+cp -f "${ROOT}/include/wwn_term.h" "${OUT}/include/wwn_term.h"
 cp -f "${ROOT}/include/ghostty.h" "${OUT}/include/ghostty.h"
 
 cd "${ROOT}"
@@ -77,11 +78,19 @@ fi
 cp -f "${LIB}" "${OUT}/libwawona_terminal.a"
 cp -f "${OUT}/libwawona_terminal.a" "${OUT}/libghostty.a"
 
-if ! (nm -g "${OUT}/libghostty.a" 2>/dev/null || true) | grep -q 'ghostty_init'; then
-  if ! grep -a -q 'ghostty_init' "${OUT}/libghostty.a"; then
-    echo "FAIL: ghostty_init missing in ${OUT}/libghostty.a" >&2
+if ! (nm -g "${OUT}/libghostty.a" 2>/dev/null || true) | grep -q 'wwn_term_new'; then
+  if ! grep -a -q 'wwn_term_new' "${OUT}/libghostty.a"; then
+    echo "FAIL: wwn_term_new missing in ${OUT}/libghostty.a" >&2
     exit 1
   fi
 fi
-echo "OK ${OUT}/libwawona_terminal.a (alias libghostty.a)"
+# Phase 5: Rust must not export Zig GhosttyLib names.
+if (nm -g "${OUT}/libghostty.a" 2>/dev/null || true) | grep -q ' T _ghostty_surface_new$'; then
+  echo "FAIL: Rust still exports ghostty_surface_new (ABI collide with Zig)" >&2
+  exit 1
+fi
+if grep -a -q $'\0ghostty_surface_new\0' "${OUT}/libghostty.a" 2>/dev/null; then
+  : # mangled strings may appear; prefer nm above
+fi
+echo "OK ${OUT}/libwawona_terminal.a (alias libghostty.a; wwn_term_* ABI)"
 ls -la "${OUT}/libwawona_terminal.a" "${OUT}/libghostty.a"

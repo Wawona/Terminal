@@ -1,60 +1,17 @@
-/* Rust libghostty C ABI for Wawona Terminal hosts.
-   Grid only. Chrome (windows, PTY, ToolbarKeys) stays in Wawona L4. */
+/* Compatibility shim. Rust VT C ABI moved to wwn_term.h (Phase 5).
+   Zig GhosttyLib owns ghostty_surface_* / ghostty_init for Metal. */
 #ifndef GHOSTTY_H
 #define GHOSTTY_H
 
-#include <stddef.h>
-#include <stdint.h>
+#include "wwn_term.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+/* Legacy type aliases for in-tree hosts still compiling against GhosttyCell. */
+typedef WwnTermCell GhosttyCell;
+typedef WwnTermSurface GhosttySurface;
 
-int ghostty_init(void);
-void ghostty_shutdown(void);
-
-typedef struct GhosttySurface GhosttySurface;
-
-typedef struct GhosttyCell {
-  uint32_t cp;
-  uint32_t fg;
-  uint32_t bg;
-  uint32_t attrs;
-} GhosttyCell;
-
-#define GHOSTTY_BOLD 1u
-#define GHOSTTY_DIM 2u
-#define GHOSTTY_ITALIC 4u
-#define GHOSTTY_UNDERLINE 8u
-
-GhosttySurface *ghostty_surface_new(uint32_t cols, uint32_t rows);
-void ghostty_surface_free(GhosttySurface *s);
-void ghostty_surface_resize(GhosttySurface *s, uint32_t cols, uint32_t rows);
-void ghostty_surface_write(GhosttySurface *s, const uint8_t *bytes, size_t len);
-void ghostty_surface_key(GhosttySurface *s, uint32_t keycode, uint32_t mods, int down);
-size_t ghostty_surface_take_reply(GhosttySurface *s, uint8_t *buf, size_t cap);
-uint32_t ghostty_surface_viewport(
-    const GhosttySurface *s, uint32_t origin, GhosttyCell *out, uint32_t cap,
-    uint32_t *cols, uint32_t *rows);
-uint32_t ghostty_surface_origin(const GhosttySurface *s);
-/* Absolute scrollback row (0 = top). Same space as Ghostty scrollbar offset. */
-void ghostty_surface_scroll_to(GhosttySurface *s, uint32_t origin);
-/* Relative scroll: negative into history, positive toward bottom. */
-void ghostty_surface_scroll_delta(GhosttySurface *s, int32_t delta);
-void ghostty_surface_scroll_bottom(GhosttySurface *s);
-uint32_t ghostty_surface_scroll_total(const GhosttySurface *s);
-/* Ghostty active selection plain text, or empty. Hosts install selection. */
-uint32_t ghostty_surface_selection_text(const GhosttySurface *s, uint8_t *out, uint32_t cap);
-uint32_t ghostty_surface_title(const GhosttySurface *s, uint8_t *out, uint32_t cap);
-void ghostty_surface_set_cell_px(GhosttySurface *s, uint32_t width, uint32_t height);
-void ghostty_surface_pointer(
-    GhosttySurface *s, uint8_t button, uint32_t col, uint32_t row, int pressed,
-    int motion);
-char *ghostty_surface_encode_paste(const GhosttySurface *s, const uint8_t *bytes, size_t len);
-void ghostty_string_free(char *ptr);
-
-#ifdef __cplusplus
-}
-#endif
+#define GHOSTTY_BOLD WWN_TERM_BOLD
+#define GHOSTTY_DIM WWN_TERM_DIM
+#define GHOSTTY_ITALIC WWN_TERM_ITALIC
+#define GHOSTTY_UNDERLINE WWN_TERM_UNDERLINE
 
 #endif

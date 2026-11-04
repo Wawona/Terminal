@@ -22,7 +22,21 @@
 let
   pname = "wawona-terminal";
   version = "0.1.0";
-  src = terminalSrc;
+  # Path flakes copy the working tree including gitignored `target/`. That
+  # stale `target/macos/.../libwawona_terminal.a` poisoned installPhase
+  # (Phase 5: old ghostty_surface_* kept shipping). Filter it out.
+  src = lib.cleanSourceWith {
+    src = terminalSrc;
+    filter =
+      path: type:
+      let
+        base = baseNameOf path;
+      in
+      base != "target"
+      && base != "result"
+      && base != ".git"
+      && !(lib.hasPrefix "result-" base);
+  };
 
   # Bump when Cargo.toml libghostty-rs rev changes. Fill via:
   #   nix build .#terminal 2>&1 | rg got:
@@ -93,12 +107,12 @@ let
     installPhase = ''
       runHook preInstall
       mkdir -p $out/lib $out/include
-      # Prefer the crate release staticlib. `find … -exec cp` used to leave a
-      # stale copy from target/**/build/**/out/ (missing newer C exports).
+      # Prefer cargo/buildRustPackage output. Never `target/macos|ios|…/` from
+      # local build-static.sh (stale ABI when path flake copied target/).
       lib=""
       for cand in \
-        target/macos/aarch64-apple-darwin/release/libwawona_terminal.a \
         target/aarch64-apple-darwin/release/libwawona_terminal.a \
+        target/x86_64-apple-darwin/release/libwawona_terminal.a \
         target/release/libwawona_terminal.a
       do
         if [[ -f "$cand" ]]; then
@@ -108,15 +122,37 @@ let
       done
       if [[ -z "$lib" ]]; then
         lib="$(find target -path '*/release/libwawona_terminal.a' \
-          ! -path '*/deps/*' ! -path '*/build/*' -print -quit)"
+          ! -path '*/deps/*' ! -path '*/build/*' \
+          ! -path 'target/macos/*' ! -path 'target/ios*' \
+          ! -path 'target/tvos*' ! -path 'target/watchos*' \
+          ! -path 'target/visionos*' ! -path 'target/android/*' \
+          ! -path 'target/linux*' -print -quit)"
       fi
       if [[ -z "$lib" || ! -f "$lib" ]]; then
         echo "installPhase: libwawona_terminal.a not found under target/" >&2
         exit 1
       fi
+      echo "installPhase: using $lib"
       cp -f "$lib" "$out/lib/libwawona_terminal.a"
+      if [[ -f ${src}/include/wwn_term.h ]]; then
+        cp -f ${src}/include/wwn_term.h $out/include/
+      fi
       if [[ -f ${src}/include/ghostty.h ]]; then
         cp -f ${src}/include/ghostty.h $out/include/
+      fi
+      # Phase 5 fail-closed: Rust VT is wwn_term_* only.
+      if command -v nm >/dev/null; then
+        nm -gU "$out/lib/libwawona_terminal.a" >$TMPDIR/term-syms.txt 2>/dev/null || true
+        if ! grep -q 'T _wwn_term_new' $TMPDIR/term-syms.txt; then
+          if ! grep -aq 'wwn_term_new' "$out/lib/libwawona_terminal.a"; then
+            echo "installPhase: wwn_term_new missing" >&2
+            exit 1
+          fi
+        fi
+        if grep -q 'T _ghostty_surface_new' $TMPDIR/term-syms.txt; then
+          echo "installPhase: ghostty_surface_new still exported (ABI collide)" >&2
+          exit 1
+        fi
       fi
       runHook postInstall
     '';

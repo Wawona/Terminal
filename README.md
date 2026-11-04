@@ -9,7 +9,7 @@ Shape matches **ToolbarKeys** and Wawona domain UniFFI:
 |-------|--------|
 | Grid / VT | [`uzaaft/libghostty-rs`](https://github.com/uzaaft/libghostty-rs) (`libghostty-vt` → Ghostty VT) |
 | Product UniFFI | This repo: `GhosttySurface` / `TerminalSession` over that engine |
-| Optional C ABI | `ghostty_surface_*` / `wwn_term_*` (same engine) |
+| Optional C ABI | `wwn_term_*` only (Zig GhosttyLib keeps `ghostty_surface_*`) |
 | Native paint | `apple/Terminal/`, `android/…`, GTK hosts |
 | Toolbar keys | `github.com/Wawona/ToolbarKeys` (separate UniFFI; where supported) |
 | Machines chrome / PTY in app | Wawona L4 when bundled |
@@ -20,8 +20,9 @@ crate. Not GhosttyKit. Not a homemade VT under a libghostty name.
 Paint is interim `apple/Terminal/GhosttyGpuView` (Metal atlas). Default
 fallback: GhosttyGpu (`WAWONA_GHOSTTY_GPU=1` / always on until tip swap).
 Zig GhosttyLib: `nix build .#libghostty-macos-draw-proof` (re-exports
-`wwn-ghostty`; link + `ghostty_surface_draw` green). Tip cannot dual-link
-that archive yet (Rust vs Zig `ghostty_surface_*` ABI). See
+`wwn-ghostty`; link + `ghostty_surface_draw` green). Phase 5: Rust VT
+exports `wwn_term_*` only so tip can dual-link Zig `ghostty_surface_*`.
+Paint still GhosttyGpu until Metal host wires `nsview`. See
 `Ghostty/docs/METAL-SURFACE.md`. Alias `libwawona_terminal.a` as
 `libghostty.a` is **not** Metal GhosttyLib.
 
@@ -30,7 +31,7 @@ that archive yet (Rust vs Zig `ghostty_surface_*` ABI). See
 ```text
 Terminal/                 # this repo (flake input: terminal)
   src/                    # UniFFI + C over libghostty-vt
-  include/ghostty.h       # optional C ABI for low-level hosts
+  include/wwn_term.h      # VT C ABI (ghostty.h is a thin shim)
   scripts/build-static.sh # out/<abi>/libwawona_terminal.a (hosts link VT)
   apple/Terminal/         # SwiftUI / UIKit / AppKit views
   android/…               # Compose text host

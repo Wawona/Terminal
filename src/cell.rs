@@ -1,4 +1,4 @@
-//! Cell layout shared by C hosts (`ghostty_surface_viewport`) and Metal paint.
+//! Cell layout shared by C hosts (`wwn_term_viewport`) and Metal paint.
 
 /// One glyph cell. Layout must stay ABI-stable for AppKit Metal hosts.
 #[repr(C)]

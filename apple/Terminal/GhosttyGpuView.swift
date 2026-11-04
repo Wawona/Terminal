@@ -9,7 +9,7 @@ import MetalKit
 ///
 /// INTERIM (TermGpu / GhosttyGpu). Do not grow atlas features (UV flips,
 /// stamp hacks). Default paint (`WAWONA_GHOSTTY_GPU=1` / always on) until
-/// tip hosts Zig GhosttyLib and stops exporting Rust `ghostty_surface_*`.
+/// tip paints via Zig GhosttyLib `ghostty_surface_draw` (Rust VT is `wwn_term_*`).
 ///
 /// TODO(metal-surface): retire after tip ABI swap. Archive + draw proof:
 /// `nix build github:Wawona/Ghostty/development#libghostty-macos-draw-proof`.

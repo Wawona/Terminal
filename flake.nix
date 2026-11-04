@@ -84,8 +84,8 @@
           zig = zigPkg;
           libghostty-vt = libghosttyVt;
         }
-        # Re-export Zig GhosttyLib + draw proof. Do not link into terminalPkg
-        # (Rust ghostty_surface_* ABI collides). Product paint: GhosttyGpu.
+        # Re-export Zig GhosttyLib + draw proof. Rust VT is wwn_term_* (Phase 5);
+        # tip may dual-link Zig. Product paint still GhosttyGpu until Metal host.
         // pkgs.lib.optionalAttrs (wwnGhosttyPkgs ? libghostty-macos) {
           libghostty-macos = wwnGhosttyPkgs.libghostty-macos;
           libghostty-macos-draw-proof = wwnGhosttyPkgs.libghostty-macos-draw-proof;
