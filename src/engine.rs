@@ -54,6 +54,20 @@ pub struct PlacedImage {
     pub rgba: Vec<u8>,
 }
 
+/// Viewport snapshot for native GPU Present hosts (UniFFI / Metal / SpriteKit).
+#[derive(Clone, Debug, Default)]
+pub struct PresentFrame {
+    pub cols: u32,
+    pub rows: u32,
+    pub cells: Vec<WwnTermCell>,
+    pub cursor_col: u32,
+    pub cursor_row: u32,
+    pub cursor_visible: bool,
+    pub scroll_origin: u32,
+    pub scroll_total: u32,
+    pub selection_text: String,
+}
+
 struct Snapshot {
     cols: u16,
     rows: u16,
@@ -346,6 +360,11 @@ impl VtEngine {
     pub fn write_viewport(&self, origin: u32, out: &mut [WwnTermCell]) -> (u32, u32, u32) {
         let _ = self.tx.send(Cmd::ScrollToOrigin(origin));
         self.sync_refresh();
+        self.copy_viewport_cells(out)
+    }
+
+    /// Current viewport cells without changing scroll origin.
+    pub fn copy_viewport_cells(&self, out: &mut [WwnTermCell]) -> (u32, u32, u32) {
         let Ok(s) = self.snap.lock() else {
             return (0, 0, 0);
         };
@@ -355,6 +374,24 @@ impl VtEngine {
         let n = need.min(out.len()).min(s.cells.len());
         out[..n].copy_from_slice(&s.cells[..n]);
         (n as u32, cols, rows)
+    }
+
+    /// Full Present frame for UniFFI / native GPU hosts.
+    pub fn present_frame(&self) -> PresentFrame {
+        let Ok(s) = self.snap.lock() else {
+            return PresentFrame::default();
+        };
+        PresentFrame {
+            cols: u32::from(s.cols),
+            rows: u32::from(s.rows),
+            cells: s.cells.clone(),
+            cursor_col: u32::from(s.cursor_col),
+            cursor_row: u32::from(s.cursor_row),
+            cursor_visible: s.cursor_visible,
+            scroll_origin: s.scroll_origin,
+            scroll_total: s.scroll_total,
+            selection_text: s.selection_text.clone(),
+        }
     }
 
     pub fn encode_paste(&self, text: &str) -> Vec<u8> {

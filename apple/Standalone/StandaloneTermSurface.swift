@@ -5,8 +5,8 @@ import Darwin
 import Metal
 import MetalKit
 
-// Metal GPU: apple/Terminal/GhosttyGpuView.swift (canonical interim atlas).
-// Compiled together by scripts/run-standalone-macos.sh.
+// Metal GPU: apple/Terminal/TerminalMetalPresent.swift (product atlas).
+// GhosttyGpuView is a typealias. Compiled by scripts/run-standalone-macos.sh.
 
 // MARK: - C ABI (libghostty-rs)
 

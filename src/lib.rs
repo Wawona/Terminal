@@ -53,6 +53,29 @@ pub struct TerminalImage {
     pub rgba: Vec<u8>,
 }
 
+/// One glyph cell for GPU Present (matches C `WwnTermCell` layout).
+#[derive(uniffi::Record, Clone)]
+pub struct TerminalCell {
+    pub cp: u32,
+    pub fg: u32,
+    pub bg: u32,
+    pub attrs: u32,
+}
+
+/// Native Present frame. Hosts paint this with Metal / SpriteKit / GLES / GL.
+#[derive(uniffi::Record)]
+pub struct TerminalFrame {
+    pub cols: u32,
+    pub rows: u32,
+    pub cells: Vec<TerminalCell>,
+    pub cursor_col: u32,
+    pub cursor_row: u32,
+    pub cursor_visible: bool,
+    pub scroll_origin: u32,
+    pub scroll_total: u32,
+    pub selection_text: String,
+}
+
 #[derive(uniffi::Object)]
 pub struct TerminalSession {
     inner: engine::VtEngine,
@@ -191,6 +214,31 @@ impl TerminalSession {
             })
             .collect()
     }
+
+    /// Cell grid for native GPU Present (Metal / SpriteKit / Android / Linux).
+    pub fn frame(&self) -> TerminalFrame {
+        let f = self.inner.present_frame();
+        TerminalFrame {
+            cols: f.cols,
+            rows: f.rows,
+            cells: f
+                .cells
+                .into_iter()
+                .map(|c| TerminalCell {
+                    cp: c.cp,
+                    fg: c.fg,
+                    bg: c.bg,
+                    attrs: c.attrs,
+                })
+                .collect(),
+            cursor_col: f.cursor_col,
+            cursor_row: f.cursor_row,
+            cursor_visible: f.cursor_visible,
+            scroll_origin: f.scroll_origin,
+            scroll_total: f.scroll_total,
+            selection_text: f.selection_text,
+        }
+    }
 }
 
 fn uniffi_line(line: engine::StyledLine) -> TerminalLine {
@@ -317,6 +365,10 @@ impl GhosttySurface {
 
     pub fn select_all(&self) {
         self.session.select_all();
+    }
+
+    pub fn frame(&self) -> TerminalFrame {
+        self.session.frame()
     }
 }
 

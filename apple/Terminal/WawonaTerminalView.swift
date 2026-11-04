@@ -28,6 +28,10 @@ struct WawonaTerminalLine: Identifiable {
 final class WawonaTerminalModel: ObservableObject {
   @Published var lines: [WawonaTerminalLine] = []
   @Published var pictures: [WawonaTerminalPicture] = []
+  /// Product Metal Present grid (`TerminalMetalPresent` / UniFFI `TerminalFrame`).
+  @Published var cells: [WwnTermCell] = []
+  @Published var cellCols: Int = 80
+  @Published var cellRows: Int = 28
   /// Bumps on every document apply, including in-place last-line edits.
   @Published var pinToken = 0
   private var nextLineID = 1
@@ -37,9 +41,29 @@ final class WawonaTerminalModel: ObservableObject {
   func reset() {
     lines = []
     pictures = []
+    cells = []
+    cellCols = 80
+    cellRows = 28
     lineIDs = []
     lineKeys = []
     pinToken += 1
+  }
+
+  func applyCells(_ grid: [WwnTermCell], cols: Int, rows: Int) {
+    let nextCols = max(1, cols)
+    let nextRows = max(1, rows)
+    let apply = { [weak self] in
+      guard let self else { return }
+      self.cells = grid
+      self.cellCols = nextCols
+      self.cellRows = nextRows
+      self.pinToken += 1
+    }
+    if Thread.isMainThread {
+      apply()
+    } else {
+      DispatchQueue.main.async(execute: apply)
+    }
   }
 
   func applyPictures(_ document: String) {
@@ -422,12 +446,43 @@ struct WawonaTerminalView: View {
   @ObservedObject var model: WawonaTerminalModel
   var screenRows: UInt32 = 28
   var onPointer: ((UInt32, UInt32, UInt32, Bool, Bool) -> Void)?
+  /// Prefer Metal Present when viewport cells are available (product path).
+  var prefersMetalPresent: Bool = true
   @State private var blinkOn = true
   @State private var stick = true
   @State private var userDragged = false
   @State private var pointerHold = WWNTermPointerHold()
 
   var body: some View {
+    Group {
+      if prefersMetalPresent, !model.cells.isEmpty {
+        metalPresent
+      } else {
+        spanPresent
+      }
+    }
+  }
+
+  private var metalPresent: some View {
+    TerminalMetalHostView(
+      cells: model.cells,
+      cols: model.cellCols,
+      rows: model.cellRows,
+      blinkOn: blinkOn,
+      cellW: WawonaTerminalFonts.cellWidth,
+      cellH: WawonaTerminalFonts.rowHeight,
+      onPointer: { col, row, button, pressed, motion in
+        onPointer?(col, row, UInt32(button), pressed, motion)
+      }
+    )
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .background(Color.black)
+    .onReceive(Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()) { _ in
+      blinkOn.toggle()
+    }
+  }
+
+  private var spanPresent: some View {
     // ScrollViewReader via Dave DeLong namespace (`WawonaBackport`). Never bare
     // ScrollViewReader at the call site (iOS 13 floor).
     WawonaBackport<Any>.scrollViewReader { proxy in

@@ -12,7 +12,8 @@ else
   echo "missing out/macos/libwawona_terminal.a (or libghostty.a); nix build .#terminal or scripts/build-static.sh macos" >&2
   exit 1
 fi
-GPU="$ROOT/apple/Terminal/GhosttyGpuView.swift"
+GPU="$ROOT/apple/Terminal/TerminalMetalPresent.swift"
+ALIAS="$ROOT/apple/Terminal/GhosttyGpuView.swift"
 FONT_ENV="$ROOT/apple/Terminal/TerminalFontEnvironment.swift"
 SRC="$ROOT/apple/Standalone/StandaloneTermSurface.swift"
 PTY_C="$ROOT/apple/Standalone/pty_spawn.c"
@@ -48,6 +49,7 @@ swiftc -O -parse-as-library \
   -I "$ROOT/include" \
   "$FONT_ENV" \
   "$GPU" \
+  "$ALIAS" \
   "$SRC" \
   "$OBJDIR/pty_spawn.o" \
   "$LIB" \
