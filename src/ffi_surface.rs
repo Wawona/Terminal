@@ -76,14 +76,50 @@ pub extern "C" fn wwn_term_feed(term: *mut c_void, bytes: *const u8, len: usize)
 
 #[no_mangle]
 pub extern "C" fn wwn_term_key(
-    _term: *mut c_void,
-    _key: u32,
-    _mods: u32,
-    _action: u32,
-    _text: *const u8,
-    _text_len: usize,
+    term: *mut c_void,
+    key: u32,
+    mods: u32,
+    action: u32,
+    text: *const u8,
+    text_len: usize,
 ) {
-    // Key encoding lands with host keymap bridge; PTY path feeds bytes today.
+    let Some(eng) = engine_mut(term) else {
+        return;
+    };
+    let slice = if text.is_null() || text_len == 0 {
+        &[][..]
+    } else {
+        unsafe { std::slice::from_raw_parts(text, text_len) }
+    };
+    eng.key(key, mods, action, slice);
+}
+
+#[no_mangle]
+pub extern "C" fn wwn_term_select_begin(term: *mut c_void, col: u32, row: u32, mode: u32) {
+    if let Some(eng) = engine_mut(term) {
+        eng.select_begin(col, row, super::engine::SelectMode::from_u32(mode));
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn wwn_term_select_extend(term: *mut c_void, col: u32, row: u32) {
+    if let Some(eng) = engine_mut(term) {
+        eng.select_extend(col, row);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn wwn_term_select_clear(term: *mut c_void) {
+    if let Some(eng) = engine_mut(term) {
+        eng.select_clear();
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn wwn_term_select_all(term: *mut c_void) {
+    if let Some(eng) = engine_mut(term) {
+        eng.select_all();
+    }
 }
 
 #[no_mangle]

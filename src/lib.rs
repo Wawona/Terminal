@@ -9,6 +9,7 @@
 mod cell;
 mod engine;
 mod ffi_surface;
+mod key_input;
 
 use std::sync::Arc;
 
@@ -144,11 +145,31 @@ impl TerminalSession {
     }
 
     /// Plain text of Ghostty's active selection, or empty if none.
-    ///
-    /// Hosts install selection via Ghostty gestures / `set_selection`. This
-    /// API only reads that selection; it does not invent one in Rust.
     pub fn selection_text(&self) -> String {
         self.inner.selection_text()
+    }
+
+    /// Encode a host key (`keycode` = libghostty Key discriminant).
+    pub fn key(&self, keycode: u32, mods: u32, action: u32, text: Vec<u8>) {
+        self.inner.key(keycode, mods, action, &text);
+    }
+
+    /// Begin selection. `mode`: 0=cell, 1=word, 2=row.
+    pub fn select_begin(&self, col: u32, row: u32, mode: u32) {
+        self.inner
+            .select_begin(col, row, engine::SelectMode::from_u32(mode));
+    }
+
+    pub fn select_extend(&self, col: u32, row: u32) {
+        self.inner.select_extend(col, row);
+    }
+
+    pub fn select_clear(&self) {
+        self.inner.select_clear();
+    }
+
+    pub fn select_all(&self) {
+        self.inner.select_all();
     }
 
     pub fn images(&self) -> Vec<TerminalImage> {
@@ -276,6 +297,26 @@ impl GhosttySurface {
 
     pub fn selection_text(&self) -> String {
         self.session.selection_text()
+    }
+
+    pub fn key(&self, keycode: u32, mods: u32, action: u32, text: Vec<u8>) {
+        self.session.key(keycode, mods, action, text);
+    }
+
+    pub fn select_begin(&self, col: u32, row: u32, mode: u32) {
+        self.session.select_begin(col, row, mode);
+    }
+
+    pub fn select_extend(&self, col: u32, row: u32) {
+        self.session.select_extend(col, row);
+    }
+
+    pub fn select_clear(&self) {
+        self.session.select_clear();
+    }
+
+    pub fn select_all(&self) {
+        self.session.select_all();
     }
 }
 

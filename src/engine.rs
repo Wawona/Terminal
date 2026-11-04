@@ -9,11 +9,12 @@ use super::cell::{
     ATTR_BLINK, ATTR_BOLD, ATTR_CURSOR, ATTR_DIM, ATTR_ITALIC, ATTR_STRIKE, ATTR_UNDERLINE,
     WwnTermCell, pack_rgb,
 };
+use super::key_input;
 use libghostty_vt::fmt::Format;
 use libghostty_vt::render::{CellIterator, Dirty, RowIterator};
-use libghostty_vt::selection::FormatOptions;
+use libghostty_vt::selection::{FormatOptions, SelectLineOptions, SelectWordOptions, Selection};
 use libghostty_vt::style::{RgbColor, Style, StyleColor, Underline};
-use libghostty_vt::terminal::ScrollViewport;
+use libghostty_vt::terminal::{Point, PointCoordinate, ScrollViewport};
 use libghostty_vt::{RenderState, Terminal, paste};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -98,6 +99,24 @@ impl Default for Snapshot {
     }
 }
 
+/// Selection gesture mode for begin/extend.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SelectMode {
+    Cell = 0,
+    Word = 1,
+    Row = 2,
+}
+
+impl SelectMode {
+    pub fn from_u32(v: u32) -> Self {
+        match v {
+            1 => Self::Word,
+            2 => Self::Row,
+            _ => Self::Cell,
+        }
+    }
+}
+
 enum Cmd {
     Feed(Vec<u8>),
     Resize { cols: u16, rows: u16 },
@@ -114,6 +133,23 @@ enum Cmd {
         pressed: bool,
         motion: bool,
     },
+    Key {
+        keycode: u32,
+        mods: u32,
+        action: u32,
+        text: Vec<u8>,
+    },
+    SelectBegin {
+        col: u32,
+        row: u32,
+        mode: SelectMode,
+    },
+    SelectExtend {
+        col: u32,
+        row: u32,
+    },
+    SelectClear,
+    SelectAll,
     Refresh { done: Sender<()> },
     Shutdown,
 }
@@ -212,6 +248,39 @@ impl VtEngine {
             pressed,
             motion,
         });
+        self.sync_refresh();
+    }
+
+    /// Encode a host key into reply bytes (libghostty-vt key encoder).
+    pub fn key(&self, keycode: u32, mods: u32, action: u32, text: &[u8]) {
+        let _ = self.tx.send(Cmd::Key {
+            keycode,
+            mods,
+            action,
+            text: text.to_vec(),
+        });
+        self.sync_refresh();
+    }
+
+    /// Begin a selection at viewport (col, row). Mode: cell / word / row.
+    pub fn select_begin(&self, col: u32, row: u32, mode: SelectMode) {
+        let _ = self.tx.send(Cmd::SelectBegin { col, row, mode });
+        self.sync_refresh();
+    }
+
+    /// Extend the active selection to viewport (col, row).
+    pub fn select_extend(&self, col: u32, row: u32) {
+        let _ = self.tx.send(Cmd::SelectExtend { col, row });
+        self.sync_refresh();
+    }
+
+    pub fn select_clear(&self) {
+        let _ = self.tx.send(Cmd::SelectClear);
+        self.sync_refresh();
+    }
+
+    pub fn select_all(&self) {
+        let _ = self.tx.send(Cmd::SelectAll);
         self.sync_refresh();
     }
 
@@ -368,6 +437,9 @@ fn worker(rx: Receiver<Cmd>, snap: Arc<Mutex<Snapshot>>, cols: u16, rows: u16) {
     let mut cell_h = 16u32;
     let mut scroll_cap = DEFAULT_SCROLLBACK;
     let mut mouse = libghostty_vt::mouse::Encoder::new().ok();
+    // Viewport selection anchor for begin/extend (col, row).
+    let mut sel_anchor: Option<(u16, u32)> = None;
+    let mut sel_mode = SelectMode::Cell;
 
     while let Ok(cmd) = rx.recv() {
         match cmd {
@@ -436,6 +508,44 @@ fn worker(rx: Receiver<Cmd>, snap: Arc<Mutex<Snapshot>>, cols: u16, rows: u16) {
                     }
                 }
             }
+            Cmd::Key {
+                keycode,
+                mods,
+                action,
+                text,
+            } => {
+                let out = key_input::encode_key(&terminal, keycode, mods, action, &text);
+                if !out.is_empty() {
+                    if let Ok(mut buf) = reply_buf.lock() {
+                        buf.extend_from_slice(&out);
+                    }
+                }
+            }
+            Cmd::SelectBegin { col, row, mode } => {
+                sel_mode = mode;
+                let x = col.min(u32::from(u16::MAX)) as u16;
+                let y = row;
+                sel_anchor = Some((x, y));
+                apply_selection(&terminal, sel_anchor, (x, y), sel_mode);
+            }
+            Cmd::SelectExtend { col, row } => {
+                let x = col.min(u32::from(u16::MAX)) as u16;
+                let y = row;
+                if sel_anchor.is_none() {
+                    sel_anchor = Some((x, y));
+                }
+                apply_selection(&terminal, sel_anchor, (x, y), sel_mode);
+            }
+            Cmd::SelectClear => {
+                sel_anchor = None;
+                let _ = terminal.set_selection(None);
+            }
+            Cmd::SelectAll => {
+                sel_anchor = None;
+                if let Ok(Some(sel)) = terminal.select_all() {
+                    let _ = terminal.set_selection(Some(&sel));
+                }
+            }
             Cmd::Refresh { done } => {
                 publish(
                     &snap,
@@ -452,6 +562,54 @@ fn worker(rx: Receiver<Cmd>, snap: Arc<Mutex<Snapshot>>, cols: u16, rows: u16) {
             }
         }
     }
+}
+
+fn viewport_ref<'t>(
+    terminal: &'t Terminal<'_, '_>,
+    col: u16,
+    row: u32,
+) -> Option<libghostty_vt::screen::GridRef<'t>> {
+    terminal
+        .grid_ref(Point::Viewport(PointCoordinate { x: col, y: row }))
+        .ok()
+}
+
+fn apply_selection(
+    terminal: &Terminal<'_, '_>,
+    anchor: Option<(u16, u32)>,
+    end: (u16, u32),
+    mode: SelectMode,
+) {
+    let Some((ax, ay)) = anchor else {
+        return;
+    };
+    let Some(start_ref) = viewport_ref(terminal, ax, ay) else {
+        return;
+    };
+    let Some(end_ref) = viewport_ref(terminal, end.0, end.1) else {
+        return;
+    };
+    match mode {
+        SelectMode::Word => {
+            if let Ok(Some(sel)) =
+                terminal.select_word(SelectWordOptions::new(start_ref.clone()))
+            {
+                let _ = terminal.set_selection(Some(&sel));
+                return;
+            }
+        }
+        SelectMode::Row => {
+            if let Ok(Some(sel)) =
+                terminal.select_line(SelectLineOptions::new(start_ref.clone()))
+            {
+                let _ = terminal.set_selection(Some(&sel));
+                return;
+            }
+        }
+        SelectMode::Cell => {}
+    }
+    let sel = Selection::new(start_ref, end_ref, false);
+    let _ = terminal.set_selection(Some(&sel));
 }
 
 fn button_from_u8(button: u8) -> libghostty_vt::mouse::Button {
@@ -806,6 +964,54 @@ mod tests {
         assert!(
             eng.selection_text().is_empty(),
             "must not invent Ghostty selection text"
+        );
+    }
+
+    #[test]
+    fn key_enter_lands_in_reply() {
+        let eng = VtEngine::new(80, 24);
+        // libghostty Key::Enter = 58
+        eng.key(58, 0, 0, b"");
+        let reply = eng.take_reply();
+        assert_eq!(reply, b"\r", "Enter should encode CR, got {reply:?}");
+    }
+
+    #[test]
+    fn key_printable_lands_in_reply() {
+        let eng = VtEngine::new(80, 24);
+        // Key::A = 20
+        eng.key(20, 0, 0, b"a");
+        let reply = eng.take_reply();
+        assert_eq!(reply, b"a");
+    }
+
+    #[test]
+    fn select_all_then_clear_round_trips() {
+        let eng = VtEngine::new(80, 24);
+        eng.feed(b"hello select world\r\n");
+        eng.select_all();
+        let text = eng.selection_text();
+        assert!(
+            !text.is_empty(),
+            "select_all should install Ghostty selection text"
+        );
+        eng.select_clear();
+        assert!(
+            eng.selection_text().is_empty(),
+            "select_clear must drop selection text"
+        );
+    }
+
+    #[test]
+    fn select_begin_extend_cell() {
+        let eng = VtEngine::new(80, 24);
+        eng.feed(b"abcdef\r\n");
+        eng.select_begin(0, 0, SelectMode::Cell);
+        eng.select_extend(3, 0);
+        let text = eng.selection_text();
+        assert!(
+            !text.is_empty(),
+            "cell begin/extend should yield selection text"
         );
     }
 }

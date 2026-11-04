@@ -35,6 +35,11 @@ void wwn_term_feed(WwnTermSurface *s, const uint8_t *bytes, size_t len);
 void wwn_term_key(
     WwnTermSurface *s, uint32_t keycode, uint32_t mods, uint32_t action, const uint8_t *text,
     size_t text_len);
+/* Selection: mode 0=cell, 1=word, 2=row. Coords are viewport cells. */
+void wwn_term_select_begin(WwnTermSurface *s, uint32_t col, uint32_t row, uint32_t mode);
+void wwn_term_select_extend(WwnTermSurface *s, uint32_t col, uint32_t row);
+void wwn_term_select_clear(WwnTermSurface *s);
+void wwn_term_select_all(WwnTermSurface *s);
 size_t wwn_term_take_reply(WwnTermSurface *s, uint8_t *buf, size_t cap);
 uint32_t wwn_term_cols(const WwnTermSurface *s);
 uint32_t wwn_term_line_count(const WwnTermSurface *s);
