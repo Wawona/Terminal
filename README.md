@@ -17,6 +17,12 @@ Shape matches **ToolbarKeys** and Wawona domain UniFFI:
 **Wawona Terminal** uses the real Ghostty VT via the Rust `libghostty-vt`
 crate. Not GhosttyKit. Not a homemade VT under a libghostty name.
 
+Paint is interim `apple/Terminal/GhosttyGpuView` (Metal atlas). Product
+goal is Zig GhosttyLib Metal via `wwn-ghostty#libghostty-macos` (fails
+closed today). `scripts/build-static.sh` may alias
+`libwawona_terminal.a` as `libghostty.a`. That is **not** Metal GhosttyLib.
+See `Ghostty/docs/METAL-SURFACE.md`.
+
 ## Layout
 
 ```text

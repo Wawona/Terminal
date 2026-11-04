@@ -7,10 +7,15 @@ import MetalKit
 
 /// Canonical Apple Metal atlas paint for Wawona Terminal.
 ///
-/// INTERIM (TermGpu / GhosttyGpu). Product goal: Zig libghostty Metal surface
-/// (`Ghostty/docs/METAL-SURFACE.md`, plan Phase 1 consolidation complete when
-/// this file is deleted in favor of `ghostty_surface_*` draw). Do not grow
-/// atlas features (UV flips, stamp hacks).
+/// INTERIM (TermGpu / GhosttyGpu). Do not grow atlas features (UV flips,
+/// stamp hacks). Delete this file only after Zig GhosttyLib Metal presents.
+///
+/// TODO(metal-surface): retire when `wwn-ghostty#libghostty-macos` installs a
+/// real static GhosttyLib (not Rust UniFFI alias) and AppKit hosts
+/// CAMetalLayer / MTKView via Ghostty renderer. Today that Nix attr fails
+/// closed. Blockers + probe: `Ghostty/docs/METAL-SURFACE.md`,
+/// `nix build github:Wawona/Ghostty/development#libghostty-macos-probe`.
+/// Do not treat `out/macos/libghostty.a` (alias of libwawona_terminal.a) as done.
 ///
 /// Staged into Wawona like ToolbarKeys: `.nix-deps/terminal/Terminal`.
 /// Standalone macOS compiles this file next to `StandaloneTermSurface.swift`.
