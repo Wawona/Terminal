@@ -122,6 +122,55 @@ pub extern "C" fn ghostty_surface_origin(s: *const c_void) -> u32 {
 }
 
 #[no_mangle]
+pub extern "C" fn ghostty_surface_scroll_to(s: *mut c_void, origin: u32) {
+    if let Some(eng) = engine_mut(s) {
+        eng.scroll_to_origin(origin);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn ghostty_surface_scroll_delta(s: *mut c_void, delta: i32) {
+    if let Some(eng) = engine_mut(s) {
+        eng.scroll_delta(delta);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn ghostty_surface_scroll_bottom(s: *mut c_void) {
+    if let Some(eng) = engine_mut(s) {
+        eng.scroll_to_bottom();
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn ghostty_surface_scroll_total(s: *const c_void) -> u32 {
+    engine_ref(s).map(|e| e.scroll_total()).unwrap_or(0)
+}
+
+/// Copy Ghostty active selection plain text into `out` (NUL-terminated when
+/// `cap > 0`). Returns byte length without NUL. Empty when no selection.
+/// Hosts must install selection via Ghostty; this does not invent one.
+#[no_mangle]
+pub extern "C" fn ghostty_surface_selection_text(s: *const c_void, out: *mut u8, cap: u32) -> u32 {
+    let Some(eng) = engine_ref(s) else {
+        return 0;
+    };
+    let text = eng.selection_text();
+    let bytes = text.as_bytes();
+    if out.is_null() || cap == 0 {
+        return bytes.len() as u32;
+    }
+    let n = bytes.len().min((cap as usize).saturating_sub(1));
+    unsafe {
+        if n > 0 {
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, n);
+        }
+        *out.add(n) = 0;
+    }
+    n as u32
+}
+
+#[no_mangle]
 pub extern "C" fn ghostty_surface_title(s: *const c_void, out: *mut u8, cap: u32) -> u32 {
     let Some(eng) = engine_ref(s) else {
         return 0;
@@ -245,6 +294,31 @@ pub extern "C" fn wwn_term_viewport(
 #[no_mangle]
 pub extern "C" fn wwn_term_origin(term: *const c_void) -> u32 {
     ghostty_surface_origin(term)
+}
+
+#[no_mangle]
+pub extern "C" fn wwn_term_scroll_to(term: *mut c_void, origin: u32) {
+    ghostty_surface_scroll_to(term, origin)
+}
+
+#[no_mangle]
+pub extern "C" fn wwn_term_scroll_delta(term: *mut c_void, delta: i32) {
+    ghostty_surface_scroll_delta(term, delta)
+}
+
+#[no_mangle]
+pub extern "C" fn wwn_term_scroll_bottom(term: *mut c_void) {
+    ghostty_surface_scroll_bottom(term)
+}
+
+#[no_mangle]
+pub extern "C" fn wwn_term_scroll_total(term: *const c_void) -> u32 {
+    ghostty_surface_scroll_total(term)
+}
+
+#[no_mangle]
+pub extern "C" fn wwn_term_selection_text(term: *const c_void, out: *mut u8, cap: u32) -> u32 {
+    ghostty_surface_selection_text(term, out, cap)
 }
 
 #[no_mangle]

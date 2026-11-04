@@ -62,7 +62,8 @@ let
     ];
     PKG_CONFIG_PATH = pkgConfigPath;
     LIBCLANG_PATH = "${libclang.lib}/lib";
-    doCheck = false;
+    # Engine unit tests (ANSI feed, resize, scrollback cap, scroll origin).
+    doCheck = true;
     meta = {
       description = "Wawona Terminal standalone (libghostty-rs + Ghostty VT + GTK)";
       mainProgram = "wawona-terminal";
@@ -87,7 +88,8 @@ let
     ];
     PKG_CONFIG_PATH = pkgConfigPath;
     LIBCLANG_PATH = "${libclang.lib}/lib";
-    doCheck = false;
+    # Engine unit tests (ANSI feed, resize, scrollback cap, scroll origin).
+    doCheck = true;
     installPhase = ''
       runHook preInstall
       mkdir -p $out/lib $out/include

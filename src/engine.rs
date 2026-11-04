@@ -9,7 +9,9 @@ use super::cell::{
     ATTR_BLINK, ATTR_BOLD, ATTR_CURSOR, ATTR_DIM, ATTR_ITALIC, ATTR_STRIKE, ATTR_UNDERLINE,
     WwnTermCell, pack_rgb,
 };
+use libghostty_vt::fmt::Format;
 use libghostty_vt::render::{CellIterator, Dirty, RowIterator};
+use libghostty_vt::selection::FormatOptions;
 use libghostty_vt::style::{RgbColor, Style, StyleColor, Underline};
 use libghostty_vt::terminal::ScrollViewport;
 use libghostty_vt::{RenderState, Terminal, paste};
@@ -59,6 +61,12 @@ struct Snapshot {
     title: String,
     reply: Vec<u8>,
     scroll_cap: usize,
+    /// Absolute row from top of scrollback ([`Scrollbar::offset`]).
+    scroll_origin: u32,
+    scroll_total: u32,
+    /// Plain text of Ghostty active selection. Empty when host has not installed
+    /// a selection (we do not invent selection in Rust).
+    selection_text: String,
     cell_w: u32,
     cell_h: u32,
     gen: u64,
@@ -77,6 +85,9 @@ impl Default for Snapshot {
             title: String::new(),
             reply: Vec::new(),
             scroll_cap: DEFAULT_SCROLLBACK,
+            scroll_origin: 0,
+            scroll_total: 0,
+            selection_text: String::new(),
             cell_w: 8,
             cell_h: 16,
             gen: 0,
@@ -92,7 +103,10 @@ enum Cmd {
     Resize { cols: u16, rows: u16 },
     SetCellPx { w: u32, h: u32 },
     SetScrollCap(usize),
+    /// Absolute scrollback row (0 = top). Same space as [`Scrollbar::offset`].
     ScrollToOrigin(u32),
+    ScrollDelta(i32),
+    ScrollToBottom,
     Pointer {
         button: u8,
         col: u32,
@@ -176,6 +190,17 @@ impl VtEngine {
 
     pub fn scroll_to_origin(&self, origin: u32) {
         let _ = self.tx.send(Cmd::ScrollToOrigin(origin));
+        self.sync_refresh();
+    }
+
+    /// Relative scroll. Negative = into history (up), positive = toward bottom.
+    pub fn scroll_delta(&self, delta: i32) {
+        let _ = self.tx.send(Cmd::ScrollDelta(delta));
+        self.sync_refresh();
+    }
+
+    pub fn scroll_to_bottom(&self) {
+        let _ = self.tx.send(Cmd::ScrollToBottom);
         self.sync_refresh();
     }
 
@@ -279,8 +304,30 @@ impl VtEngine {
         Vec::new()
     }
 
+    /// Current viewport origin (absolute scrollback row).
     pub fn origin(&self) -> u32 {
-        0
+        self.snap
+            .lock()
+            .map(|s| s.scroll_origin)
+            .unwrap_or(0)
+    }
+
+    pub fn scroll_total(&self) -> u32 {
+        self.snap
+            .lock()
+            .map(|s| s.scroll_total)
+            .unwrap_or(0)
+    }
+
+    /// Plain text of Ghostty's active selection, or empty if none.
+    ///
+    /// Hosts must install selection through Ghostty gesture / `set_selection`
+    /// APIs. This crate does not invent a parallel selection model.
+    pub fn selection_text(&self) -> String {
+        self.snap
+            .lock()
+            .map(|s| s.selection_text.clone())
+            .unwrap_or_default()
     }
 }
 
@@ -347,11 +394,14 @@ fn worker(rx: Receiver<Cmd>, snap: Arc<Mutex<Snapshot>>, cols: u16, rows: u16) {
                 let _ = terminal.set_scrollback_max_lines(Some(cap));
             }
             Cmd::ScrollToOrigin(origin) => {
-                if origin == 0 {
-                    terminal.scroll_viewport(ScrollViewport::Bottom);
-                } else {
-                    terminal.scroll_viewport(ScrollViewport::Row(origin as usize));
-                }
+                // Row 0 is the top of scrollback (Ghostty scrollbar offset space).
+                terminal.scroll_viewport(ScrollViewport::Row(origin as usize));
+            }
+            Cmd::ScrollDelta(delta) => {
+                terminal.scroll_viewport(ScrollViewport::Delta(delta as isize));
+            }
+            Cmd::ScrollToBottom => {
+                terminal.scroll_viewport(ScrollViewport::Bottom);
             }
             Cmd::Pointer {
                 button,
@@ -534,6 +584,28 @@ fn publish<'a>(
         .map(|mut b| std::mem::take(&mut *b))
         .unwrap_or_default();
 
+    let (scroll_origin, scroll_total) = terminal
+        .scrollbar()
+        .map(|sb| {
+            (
+                u32::try_from(sb.offset).unwrap_or(u32::MAX),
+                u32::try_from(sb.total).unwrap_or(u32::MAX),
+            )
+        })
+        .unwrap_or((0, 0));
+
+    // Ghostty active selection only. No host-side fake selection text.
+    let selection_text = {
+        let options = FormatOptions::new()
+            .with_emit_format(Format::Plain)
+            .with_unwrap(true)
+            .with_trim(true);
+        match terminal.format_selection_alloc(None, options) {
+            Ok(Some(bytes)) => String::from_utf8_lossy(&bytes).into_owned(),
+            _ => String::new(),
+        }
+    };
+
     // Prefer last Resize size so the Metal grid stays cols×rows (pad blanks).
     let (cols, rows_n) = snap
         .lock()
@@ -583,6 +655,9 @@ fn publish<'a>(
             s.reply.extend_from_slice(&reply);
         }
         s.scroll_cap = scroll_cap;
+        s.scroll_origin = scroll_origin;
+        s.scroll_total = scroll_total;
+        s.selection_text = selection_text;
         s.cell_w = cell_w;
         s.cell_h = cell_h;
         s.cursor_col = cursor_col;
@@ -672,4 +747,65 @@ unsafe extern "C" {
         newp: *mut std::ffi::c_void,
         newlen: usize,
     ) -> i32;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn feed_ansi_lines_json_nonempty() {
+        let eng = VtEngine::new(80, 24);
+        eng.feed(b"\x1b[31mhello\x1b[0m world\r\n");
+        let json = eng.lines_json();
+        assert!(
+            json.contains("hello"),
+            "expected styled text in lines_json, got {json}"
+        );
+        assert!(!eng.styled_lines().is_empty());
+    }
+
+    #[test]
+    fn resize_updates_geometry() {
+        let eng = VtEngine::new(40, 12);
+        eng.resize(100, 30);
+        assert_eq!(eng.cols(), 100);
+        assert_eq!(eng.rows(), 30);
+    }
+
+    #[test]
+    fn scrollback_cap_round_trips() {
+        let eng = VtEngine::new(80, 24);
+        eng.set_scroll_cap(2_500);
+        assert_eq!(eng.scroll_cap(), 2_500);
+    }
+
+    #[test]
+    fn scroll_origin_tracks_scrollbar() {
+        let eng = VtEngine::new(80, 10);
+        // Fill past the viewport so scrollback exists.
+        for i in 0..40 {
+            eng.feed(format!("line-{i}\r\n").as_bytes());
+        }
+        eng.scroll_to_bottom();
+        let at_bottom = eng.origin();
+        eng.scroll_delta(-5);
+        let after_up = eng.origin();
+        assert!(
+            after_up < at_bottom || at_bottom == 0,
+            "scroll up should decrease origin (bottom={at_bottom} after={after_up})"
+        );
+        eng.scroll_to_origin(0);
+        assert_eq!(eng.origin(), 0);
+    }
+
+    #[test]
+    fn selection_text_empty_without_host_selection() {
+        let eng = VtEngine::new(80, 24);
+        eng.feed(b"no selection yet\r\n");
+        assert!(
+            eng.selection_text().is_empty(),
+            "must not invent Ghostty selection text"
+        );
+    }
 }

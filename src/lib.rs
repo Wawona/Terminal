@@ -120,6 +120,36 @@ impl TerminalSession {
         self.inner.set_cell_px(width, height);
     }
 
+    /// Absolute scrollback row (Ghostty scrollbar offset). 0 = top of history.
+    pub fn scroll_origin(&self) -> u32 {
+        self.inner.origin()
+    }
+
+    pub fn set_scroll_origin(&self, origin: u32) {
+        self.inner.scroll_to_origin(origin);
+    }
+
+    /// Relative scroll. Negative into history, positive toward bottom.
+    pub fn scroll_delta(&self, delta: i32) {
+        self.inner.scroll_delta(delta);
+    }
+
+    pub fn scroll_to_bottom(&self) {
+        self.inner.scroll_to_bottom();
+    }
+
+    pub fn scroll_total(&self) -> u32 {
+        self.inner.scroll_total()
+    }
+
+    /// Plain text of Ghostty's active selection, or empty if none.
+    ///
+    /// Hosts install selection via Ghostty gestures / `set_selection`. This
+    /// API only reads that selection; it does not invent one in Rust.
+    pub fn selection_text(&self) -> String {
+        self.inner.selection_text()
+    }
+
     pub fn images(&self) -> Vec<TerminalImage> {
         self.inner
             .placed_images()
@@ -221,6 +251,30 @@ impl GhosttySurface {
 
     pub fn scrollback_cap(&self) -> u32 {
         self.session.scrollback_cap()
+    }
+
+    pub fn scroll_origin(&self) -> u32 {
+        self.session.scroll_origin()
+    }
+
+    pub fn set_scroll_origin(&self, origin: u32) {
+        self.session.set_scroll_origin(origin);
+    }
+
+    pub fn scroll_delta(&self, delta: i32) {
+        self.session.scroll_delta(delta);
+    }
+
+    pub fn scroll_to_bottom(&self) {
+        self.session.scroll_to_bottom();
+    }
+
+    pub fn scroll_total(&self) -> u32 {
+        self.session.scroll_total()
+    }
+
+    pub fn selection_text(&self) -> String {
+        self.session.selection_text()
     }
 }
 

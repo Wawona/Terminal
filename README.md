@@ -54,14 +54,27 @@ nix develop   # zig + pkg-config VT + rust 1.90
 Cargo feature `nix-ghostty-vt` enables `libghostty-vt-sys/pkg-config` so the
 build links the Nix archive instead of fetching/building Ghostty in `build.rs`.
 
+## Scroll and selection APIs
+
+| API | Source |
+|-----|--------|
+| `scroll_origin` / `set_scroll_origin` / `scroll_delta` / `scroll_to_bottom` | Ghostty `scrollbar().offset` + `scroll_viewport` |
+| `selection_text` | Ghostty `format_selection_alloc` (active selection only) |
+
+`selection_text` is empty until the **host** installs a Ghostty selection
+(gestures / `Terminal::set_selection`). This crate does **not** invent a
+parallel selection model in Rust. Host UI (Metal/UIKit/Compose) owns gesture
+→ Ghostty selection; UniFFI/C only read the result.
+
 ## Host / local cargo
 
 If you skip Nix, you need Zig matching the libghostty-rs pin (tip: **0.17.x**).
 Prefer that repo's `nix develop`, or set `ZIG` / `GHOSTTY_SOURCE_DIR`.
 
 ```bash
-cargo build --release
-./scripts/build-static.sh macos   # uses nix-ghostty-vt when PKG_CONFIG_PATH set
+cargo build --release --features nix-ghostty-vt
+cargo test --features nix-ghostty-vt   # or: nix build .#terminal (doCheck)
+./scripts/build-static.sh macos        # fail-closed; no stub archive
 ```
 
 ## Standalone

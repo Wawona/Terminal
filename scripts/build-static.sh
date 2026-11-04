@@ -2,6 +2,8 @@
 # Build Rust libghostty-rs static archive for one Wawona product ABI.
 # Usage: ./scripts/build-static.sh <abi>
 # Output: out/<abi>/libghostty.a (+ include/ghostty.h)
+#
+# Fail closed: never emit an empty stub archive. Real libghostty-rs only.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -58,62 +60,22 @@ if [[ -n "${PKG_CONFIG_PATH:-}" ]] || [[ "${WAWONA_TERMINAL_NIX_VT:-0}" == "1" ]
   FEATURES+=( --features nix-ghostty-vt )
 fi
 echo "+ cargo build -p wawona-terminal --release --target ${TARGET} ${FEATURES[*]:-}"
-# Standalone / product hosts need the real libghostty-rs grid. Stub empty
-# viewport looks like a "working" app with blank Metal/GTK. Fail closed when
-# WAWONA_TERMINAL_FAIL_STUB=1 (nix run .#terminal) or ABI is macos*.
-FAIL_STUB=0
-if [[ "${WAWONA_TERMINAL_FAIL_STUB:-0}" == "1" ]]; then
-  FAIL_STUB=1
-fi
-case "${ABI}" in
-  macos|macos-x86_64) FAIL_STUB=1 ;;
-esac
 if ! cargo build -p wawona-terminal --release --target "${TARGET}" "${FEATURES[@]}" 2>"${OUT}/build.log"; then
-  if [[ "${FAIL_STUB}" -eq 1 ]]; then
-    echo "FAIL: cargo target ${TARGET} (real libghostty-rs required)" >&2
-    tail -40 "${OUT}/build.log" || true
-    exit 1
-  fi
-  echo "warn: cargo target ${TARGET} failed; building host stub archive" >&2
-  tail -20 "${OUT}/build.log" || true
-  STUB_C="${ROOT}/bootstrap/ghostty_stub.c"
-  mkdir -p "${ROOT}/bootstrap"
-  if [[ ! -f "${STUB_C}" ]]; then
-    cat >"${STUB_C}" <<'STUB'
-#include <stddef.h>
-#include <stdint.h>
-int ghostty_init(void) { return 0; }
-void ghostty_shutdown(void) {}
-void *ghostty_surface_new(uint32_t c, uint32_t r) { (void)c;(void)r; return (void*)(uintptr_t)1; }
-void ghostty_surface_free(void *s) { (void)s; }
-void ghostty_surface_resize(void *s, uint32_t c, uint32_t r) { (void)s;(void)c;(void)r; }
-void ghostty_surface_write(void *s, const uint8_t *b, size_t n) { (void)s;(void)b;(void)n; }
-void ghostty_surface_key(void *s, uint32_t k, uint32_t m, int d) { (void)s;(void)k;(void)m;(void)d; }
-size_t ghostty_surface_take_reply(void *s, uint8_t *b, size_t c) { (void)s;(void)b;(void)c; return 0; }
-uint32_t ghostty_surface_viewport(const void *s, uint32_t o, void *out, uint32_t cap, uint32_t *c, uint32_t *r) {
-  (void)s;(void)o;(void)out;(void)cap; if(c)*c=0; if(r)*r=0; return 0;
-}
-uint32_t ghostty_surface_origin(const void *s) { (void)s; return 0; }
-uint32_t ghostty_surface_title(const void *s, uint8_t *o, uint32_t c) { (void)s;(void)o;(void)c; return 0; }
-void ghostty_surface_set_cell_px(void *s, uint32_t w, uint32_t h) { (void)s;(void)w;(void)h; }
-void ghostty_surface_pointer(void *s, uint8_t b, uint32_t c, uint32_t r, int p, int m) {
-  (void)s;(void)b;(void)c;(void)r;(void)p;(void)m;
-}
-char *ghostty_surface_encode_paste(const void *s, const uint8_t *b, size_t n) { (void)s;(void)b;(void)n; return NULL; }
-void ghostty_string_free(char *p) { (void)p; }
-STUB
-  fi
-  OBJ="${OUT}/ghostty_stub.o"
-  clang -c -O2 -fPIC "${STUB_C}" -o "${OBJ}"
-  ar rcs "${OUT}/libghostty.a" "${OBJ}"
-else
-  LIB="${CARGO_TARGET_DIR}/${TARGET}/release/libwawona_terminal.a"
-  if [[ ! -f "${LIB}" ]]; then
-    LIB=$(find "${CARGO_TARGET_DIR}" -name 'libwawona_terminal.a' | head -1)
-  fi
-  cp -f "${LIB}" "${OUT}/libwawona_terminal.a"
-  cp -f "${OUT}/libwawona_terminal.a" "${OUT}/libghostty.a"
+  echo "FAIL: cargo target ${TARGET} (real libghostty-rs required; stub archives removed)" >&2
+  tail -40 "${OUT}/build.log" || true
+  exit 1
 fi
+
+LIB="${CARGO_TARGET_DIR}/${TARGET}/release/libwawona_terminal.a"
+if [[ ! -f "${LIB}" ]]; then
+  LIB=$(find "${CARGO_TARGET_DIR}" -name 'libwawona_terminal.a' ! -path '*/deps/*' ! -path '*/build/*' | head -1)
+fi
+if [[ -z "${LIB}" || ! -f "${LIB}" ]]; then
+  echo "FAIL: libwawona_terminal.a missing after cargo build" >&2
+  exit 1
+fi
+cp -f "${LIB}" "${OUT}/libwawona_terminal.a"
+cp -f "${OUT}/libwawona_terminal.a" "${OUT}/libghostty.a"
 
 if ! (nm -g "${OUT}/libghostty.a" 2>/dev/null || true) | grep -q 'ghostty_init'; then
   if ! grep -a -q 'ghostty_init' "${OUT}/libghostty.a"; then

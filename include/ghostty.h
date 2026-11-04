@@ -37,6 +37,14 @@ uint32_t ghostty_surface_viewport(
     const GhosttySurface *s, uint32_t origin, GhosttyCell *out, uint32_t cap,
     uint32_t *cols, uint32_t *rows);
 uint32_t ghostty_surface_origin(const GhosttySurface *s);
+/* Absolute scrollback row (0 = top). Same space as Ghostty scrollbar offset. */
+void ghostty_surface_scroll_to(GhosttySurface *s, uint32_t origin);
+/* Relative scroll: negative into history, positive toward bottom. */
+void ghostty_surface_scroll_delta(GhosttySurface *s, int32_t delta);
+void ghostty_surface_scroll_bottom(GhosttySurface *s);
+uint32_t ghostty_surface_scroll_total(const GhosttySurface *s);
+/* Ghostty active selection plain text, or empty. Hosts install selection. */
+uint32_t ghostty_surface_selection_text(const GhosttySurface *s, uint8_t *out, uint32_t cap);
 uint32_t ghostty_surface_title(const GhosttySurface *s, uint8_t *out, uint32_t cap);
 void ghostty_surface_set_cell_px(GhosttySurface *s, uint32_t width, uint32_t height);
 void ghostty_surface_pointer(

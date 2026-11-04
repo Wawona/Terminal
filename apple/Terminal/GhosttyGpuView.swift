@@ -93,6 +93,20 @@ final class GhosttyGpuView: MTKView, MTKViewDelegate {
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
+    // Keep default MTKView isFlipped (false). Overriding it made AppKit
+    // geometry-flip the CAMetalLayer (Focus painted wrong). Detect a flipped
+    // SwiftUI ancestor only to invert the Metal viewport Y axis in draw(in:).
+
+    /// True under NSHostingView / other flipped AppKit hosts (Focus embed).
+    private var hostIsFlipped: Bool {
+        var ancestor: NSView? = superview
+        while let view = ancestor {
+            if view.isFlipped { return true }
+            ancestor = view.superview
+        }
+        return false
+    }
+
     /// Rebuild glyph atlas when the host backing scale changes (retina).
     func syncBackingScale(_ scale: CGFloat) {
         let s = max(1, Int(scale.rounded()))
@@ -179,6 +193,19 @@ final class GhosttyGpuView: MTKView, MTKViewDelegate {
         guard let buffer, let cmd = queue.makeCommandBuffer(),
             let enc = cmd.makeRenderCommandEncoder(descriptor: pass)
         else { return }
+        // Focus Present sits under flipped SwiftUI (NSHostingView). Metal still
+        // draws Y-up into the drawable; without a Y-only viewport invert the
+        // grid appears vertically mirrored. Do not set MTKView.isFlipped and
+        // do not negate width (that is a 180° rotate, not a Y fix).
+        if hostIsFlipped {
+            let tw = Double(drawable.texture.width)
+            let th = Double(drawable.texture.height)
+            enc.setViewport(
+                MTLViewport(
+                    originX: 0, originY: th, width: tw, height: -th, znear: 0, zfar: 1
+                )
+            )
+        }
         var dim = GpuDim(
             cols: UInt32(cols), rows: UInt32(rows), phase: blinkOn ? 1 : 0,
             selStart: hasSelection ? selStart : 0xFFFF_FFFF,
