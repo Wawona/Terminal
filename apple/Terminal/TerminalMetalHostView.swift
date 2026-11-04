@@ -40,7 +40,10 @@ final class TerminalMetalTouchHost: UIView {
   override init(frame: CGRect) {
     super.init(frame: frame)
     backgroundColor = .black
+    #if !os(tvOS)
+    // API_UNAVAILABLE(tvos) on UIView.multipleTouchEnabled.
     isMultipleTouchEnabled = false
+    #endif
     gpu.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     gpu.frame = bounds
     addSubview(gpu)
@@ -52,7 +55,9 @@ final class TerminalMetalTouchHost: UIView {
   override func layoutSubviews() {
     super.layoutSubviews()
     gpu.frame = bounds
-    let scale = window?.screen.scale ?? UIScreen.main.scale
+    // Trait scale works on iOS / tvOS / visionOS. Avoid UIScreen.main
+    // (deprecated tvOS 26+, unavailable visionOS).
+    let scale = max(window?.traitCollection.displayScale ?? traitCollection.displayScale, 1)
     gpu.syncBackingScale(scale)
     gpu.drawableSize = CGSize(
       width: max(1, bounds.width * scale), height: max(1, bounds.height * scale)
