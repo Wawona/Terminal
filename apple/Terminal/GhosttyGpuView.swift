@@ -260,7 +260,7 @@ final class GhosttyGpuView: MTKView, MTKViewDelegate {
             let p10 = ndc(c1, r0)
             let p01 = ndc(c0, r1)
             let p11 = ndc(c1, r1)
-            var quad: [Float] = [
+            let quad: [Float] = [
                 p00.0, p00.1, 0, 0, p10.0, p10.1, 1, 0, p01.0, p01.1, 0, 1,
                 p10.0, p10.1, 1, 0, p11.0, p11.1, 1, 1, p01.0, p01.1, 0, 1,
             ]
@@ -293,7 +293,7 @@ final class GhosttyGpuView: MTKView, MTKViewDelegate {
     private func clearAtlas() {
         guard let atlas else { return }
         let bytes = glyphW * glyphH
-        var zeros = [UInt8](repeating: 0, count: bytes)
+        let zeros = [UInt8](repeating: 0, count: bytes)
         for row in 0..<atlasSide {
             for col in 0..<atlasSide {
                 let region = MTLRegionMake2D(col * glyphW, row * glyphH, glyphW, glyphH)
@@ -344,8 +344,8 @@ final class GhosttyGpuView: MTKView, MTKViewDelegate {
     }
 
     private static func resolveMonoFont(size: CGFloat) -> NSFont {
-        WWNBundleShareEnvironment.registerBundledFontsIfNeeded()
-        if let nerd = NSFont(name: "DejaVuSansM Nerd Font Mono", size: size) {
+        TerminalFontEnvironment.registerIfNeeded()
+        if let nerd = NSFont(name: TerminalFontEnvironment.nerdFaceName, size: size) {
             return nerd
         }
         if let mono = NSFont(name: "DejaVu Sans Mono", size: size) {

@@ -222,15 +222,15 @@ struct WawonaTerminalRun: Identifiable {
 enum WawonaTerminalFonts {
   static let pointSize: CGFloat = 13
   static var host: Font {
-    WWNBundleShareEnvironment.registerBundledFontsIfNeeded()
-    if UIFont(name: "DejaVuSansM Nerd Font Mono", size: pointSize) != nil {
-      return Font.custom("DejaVuSansM Nerd Font Mono", size: pointSize)
+    TerminalFontEnvironment.registerIfNeeded()
+    if UIFont(name: TerminalFontEnvironment.nerdFaceName, size: pointSize) != nil {
+      return Font.custom(TerminalFontEnvironment.nerdFaceName, size: pointSize)
     }
     return Font.system(size: pointSize, design: .monospaced)
   }
   static var nerd: Font {
-    WWNBundleShareEnvironment.registerBundledFontsIfNeeded()
-    return Font.custom("DejaVuSansM Nerd Font Mono", size: pointSize)
+    TerminalFontEnvironment.registerIfNeeded()
+    return Font.custom(TerminalFontEnvironment.nerdFaceName, size: pointSize)
   }
 
   static var rowHeight: CGFloat {
@@ -238,8 +238,8 @@ enum WawonaTerminalFonts {
   }
 
   static var metricsFont: UIFont {
-    WWNBundleShareEnvironment.registerBundledFontsIfNeeded()
-    if let nerd = UIFont(name: "DejaVuSansM Nerd Font Mono", size: pointSize) {
+    TerminalFontEnvironment.registerIfNeeded()
+    if let nerd = UIFont(name: TerminalFontEnvironment.nerdFaceName, size: pointSize) {
       return nerd
     }
     return UIFont.monospacedSystemFont(ofSize: pointSize, weight: .regular)

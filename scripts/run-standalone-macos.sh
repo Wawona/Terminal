@@ -13,6 +13,7 @@ else
   exit 1
 fi
 GPU="$ROOT/apple/Terminal/GhosttyGpuView.swift"
+FONT_ENV="$ROOT/apple/Terminal/TerminalFontEnvironment.swift"
 SRC="$ROOT/apple/Standalone/StandaloneTermSurface.swift"
 PTY_C="$ROOT/apple/Standalone/pty_spawn.c"
 OBJDIR="$(mktemp -d /tmp/wawona-term-build.XXXXXX)"
@@ -45,6 +46,7 @@ swiftc -O -parse-as-library \
   -framework AppKit -framework Metal -framework MetalKit -framework CoreText \
   -lutil \
   -I "$ROOT/include" \
+  "$FONT_ENV" \
   "$GPU" \
   "$SRC" \
   "$OBJDIR/pty_spawn.o" \
