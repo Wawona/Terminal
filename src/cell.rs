@@ -16,6 +16,8 @@ pub const ATTR_ITALIC: u32 = 4;
 pub const ATTR_UNDERLINE: u32 = 8;
 pub const ATTR_BLINK: u32 = 16;
 pub const ATTR_STRIKE: u32 = 32;
+/// Cell under the VT cursor (host Metal draws block / jump trail).
+pub const ATTR_CURSOR: u32 = 64;
 
 #[inline]
 pub fn pack_rgb(r: u8, g: u8, b: u8) -> u32 {

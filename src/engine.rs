@@ -5,7 +5,8 @@
 //! talk through this Send-safe handle.
 
 use crate::cell::{
-    ATTR_BLINK, ATTR_BOLD, ATTR_DIM, ATTR_ITALIC, ATTR_STRIKE, ATTR_UNDERLINE, WwnTermCell, pack_rgb,
+    ATTR_BLINK, ATTR_BOLD, ATTR_CURSOR, ATTR_DIM, ATTR_ITALIC, ATTR_STRIKE, ATTR_UNDERLINE,
+    WwnTermCell, pack_rgb,
 };
 use libghostty_vt::render::{CellIterator, Dirty, RowIterator};
 use libghostty_vt::style::{RgbColor, Style, StyleColor, Underline};
@@ -60,6 +61,9 @@ struct Snapshot {
     cell_w: u32,
     cell_h: u32,
     gen: u64,
+    cursor_col: u16,
+    cursor_row: u16,
+    cursor_visible: bool,
 }
 
 impl Default for Snapshot {
@@ -75,6 +79,9 @@ impl Default for Snapshot {
             cell_w: 8,
             cell_h: 16,
             gen: 0,
+            cursor_col: 0,
+            cursor_row: 0,
+            cursor_visible: true,
         }
     }
 }
@@ -552,6 +559,19 @@ fn publish<'a>(
         lines.truncate(rows_n as usize);
     }
 
+    let cursor_visible = terminal.is_cursor_visible().unwrap_or(true);
+    let cursor_col = terminal.cursor_x().unwrap_or(0);
+    let cursor_row = terminal.cursor_y().unwrap_or(0);
+    if cursor_visible {
+        let idx = (cursor_row as usize).saturating_mul(cols as usize)
+            .saturating_add(cursor_col as usize);
+        if let Some(cell) = cells.get_mut(idx) {
+            cell.attrs |= ATTR_CURSOR;
+            // Block cursor: invert like classic Ghostty block when cell has no reverse yet.
+            std::mem::swap(&mut cell.fg, &mut cell.bg);
+        }
+    }
+
     if let Ok(mut s) = snap.lock() {
         s.cols = cols;
         s.rows = rows_n;
@@ -564,6 +584,9 @@ fn publish<'a>(
         s.scroll_cap = scroll_cap;
         s.cell_w = cell_w;
         s.cell_h = cell_h;
+        s.cursor_col = cursor_col;
+        s.cursor_row = cursor_row;
+        s.cursor_visible = cursor_visible;
         s.gen = s.gen.wrapping_add(1);
     }
 }

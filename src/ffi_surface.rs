@@ -152,11 +152,12 @@ pub extern "C" fn ghostty_surface_pointer(
     button: u8,
     col: u32,
     row: u32,
-    pressed: bool,
-    motion: bool,
+    pressed: i32,
+    motion: i32,
 ) {
+    // i32 matches AppKit Swift @_silgen_name (bool is not C ABI-stable here).
     if let Some(eng) = engine_mut(s) {
-        eng.pointer(button, col, row, pressed, motion);
+        eng.pointer(button, col, row, pressed != 0, motion != 0);
     }
 }
 
@@ -253,6 +254,18 @@ pub extern "C" fn wwn_term_title(term: *const c_void, out: *mut u8, cap: u32) ->
 #[no_mangle]
 pub extern "C" fn wwn_term_set_cell_px(term: *mut c_void, width: u32, height: u32) {
     ghostty_surface_set_cell_px(term, width, height)
+}
+
+#[no_mangle]
+pub extern "C" fn wwn_term_refresh_scrollback_cap(term: *mut c_void, host_factor_permille: u32) {
+    let Some(eng) = engine_mut(term) else {
+        return;
+    };
+    let factor = (host_factor_permille.clamp(250, 1000) as f32) / 1000.0;
+    let cols = eng.cols();
+    let base = crate::engine::recommended_scroll_cap(cols);
+    let capped = ((base as f32) * factor).round() as usize;
+    eng.set_scroll_cap(capped.clamp(1_000, 100_000));
 }
 
 #[no_mangle]

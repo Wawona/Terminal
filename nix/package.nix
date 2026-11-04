@@ -91,7 +91,28 @@ let
     installPhase = ''
       runHook preInstall
       mkdir -p $out/lib $out/include
-      find target -name 'libwawona_terminal.a' -print -exec cp -f {} $out/lib/ \;
+      # Prefer the crate release staticlib. `find … -exec cp` used to leave a
+      # stale copy from target/**/build/**/out/ (missing newer C exports).
+      lib=""
+      for cand in \
+        target/macos/aarch64-apple-darwin/release/libwawona_terminal.a \
+        target/aarch64-apple-darwin/release/libwawona_terminal.a \
+        target/release/libwawona_terminal.a
+      do
+        if [[ -f "$cand" ]]; then
+          lib="$cand"
+          break
+        fi
+      done
+      if [[ -z "$lib" ]]; then
+        lib="$(find target -path '*/release/libwawona_terminal.a' \
+          ! -path '*/deps/*' ! -path '*/build/*' -print -quit)"
+      fi
+      if [[ -z "$lib" || ! -f "$lib" ]]; then
+        echo "installPhase: libwawona_terminal.a not found under target/" >&2
+        exit 1
+      fi
+      cp -f "$lib" "$out/lib/libwawona_terminal.a"
       if [[ -f ${src}/include/ghostty.h ]]; then
         cp -f ${src}/include/ghostty.h $out/include/
       fi
